@@ -115,7 +115,7 @@ pub fn NextFitAllocator(config: Config) type {
             .free = &VTable.free,
         };
 
-        pub fn init(heap: []const u8) Self {
+        pub fn init(heap: []u8) Self {
             return .{
                 .heap = heap,
             };
