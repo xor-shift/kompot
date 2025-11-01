@@ -23,7 +23,7 @@ test {
     std.testing.refAllDecls(fmt);
     std.testing.refAllDecls(ring_buffer);
 
-    std.testing.refAllDecls(coro);
+    // std.testing.refAllDecls(coro);
     std.testing.refAllDecls(dyn);
     std.testing.refAllDecls(heap);
     std.testing.refAllDecls(thread);

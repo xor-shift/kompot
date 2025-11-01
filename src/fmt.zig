@@ -38,10 +38,12 @@ pub const ConversionSpecifier = struct {
     pub const @"u16": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(u16) } };
     pub const @"u32": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(u32) } };
     pub const @"u64": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(u64) } };
+    pub const @"usize": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(usize) } };
     pub const @"i8": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(i8) } };
     pub const @"i16": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(i16) } };
     pub const @"i32": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(i32) } };
     pub const @"i64": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(i64) } };
+    pub const @"isize": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(isize) } };
     pub const @"f16": ConversionSpecifier = .{ .basic_specifier = .{ .float = .from(f16) } };
     pub const @"f32": ConversionSpecifier = .{ .basic_specifier = .{ .float = .from(f32) } };
     pub const @"f64": ConversionSpecifier = .{ .basic_specifier = .{ .float = .from(f64) } };
@@ -55,10 +57,12 @@ pub const FormatElement = union(enum) {
     pub const @"u16": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(u16) } } };
     pub const @"u32": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(u32) } } };
     pub const @"u64": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(u64) } } };
+    pub const @"usize": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(usize) } } };
     pub const @"i8": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(i8) } } };
     pub const @"i16": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(i16) } } };
     pub const @"i32": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(i32) } } };
     pub const @"i64": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(i64) } } };
+    pub const @"isize": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(isize) } } };
     pub const @"f16": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .float = .from(f16) } } };
     pub const @"f32": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .float = .from(f32) } } };
     pub const @"f64": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .float = .from(f64) } } };
@@ -86,11 +90,23 @@ fn formatElement(writer: *std.io.Writer, elem: FormatElement, arg_reader: *std.i
         .value => 1,
     };
 
-    if (specifier.kind == .array) {
-        try writer.writeAll("[");
+    const bs_is_character = switch (specifier.basic_specifier) {
+        .int => |v| true and v.underlying.signedness == .unsigned and v.underlying.bits == 8 and v.base == 10 and v.case == .lower,
+        .float => false,
+    };
+
+    const value_is_string = specifier.kind == .array and bs_is_character;
+
+    if (value_is_string) {
+        try writer.writeByte('"');
+    } else if (specifier.kind == .array) {
+        try writer.writeByte('[');
     }
 
-    for (0..count) |i| {
+    // special case
+    if (value_is_string) {
+        try arg_reader.streamExact(writer, count);
+    } else for (0..count) |i| {
         if (i != 0) try writer.writeAll(", ");
         switch (specifier.basic_specifier) {
             .int => |v| try switch (v.underlying.signedness) {
@@ -118,8 +134,10 @@ fn formatElement(writer: *std.io.Writer, elem: FormatElement, arg_reader: *std.i
         }
     }
 
-    if (specifier.kind == .array) {
-        try writer.writeAll("]");
+    if (value_is_string) {
+        try writer.writeByte('"');
+    } else if (specifier.kind == .array) {
+        try writer.writeByte(']');
     }
 }
 
@@ -172,7 +190,10 @@ pub fn formatStr(writer: *std.io.Writer, format_str: []const u8, arg_stream: *st
 
                 const maybe_arg_split = std.mem.indexOfScalar(u8, spec_str, ':');
 
-                const base_spec_str = spec_str[0 .. maybe_arg_split orelse spec_str.len];
+                const full_spec_str = spec_str[0 .. maybe_arg_split orelse spec_str.len];
+                const spec_is_array = std.mem.startsWith(u8, full_spec_str, "[]");
+                const base_spec_str = if (spec_is_array) full_spec_str[2..] else full_spec_str;
+
                 const spec_args = spec_str[maybe_arg_split orelse spec_str.len ..];
 
                 const spec_lookup = .{
@@ -180,10 +201,12 @@ pub fn formatStr(writer: *std.io.Writer, format_str: []const u8, arg_stream: *st
                     .{ "u16", ConversionSpecifier.u16 },
                     .{ "u32", ConversionSpecifier.u32 },
                     .{ "u64", ConversionSpecifier.u64 },
+                    .{ "usize", ConversionSpecifier.usize },
                     .{ "i8", ConversionSpecifier.i8 },
                     .{ "i16", ConversionSpecifier.i16 },
                     .{ "i32", ConversionSpecifier.i32 },
                     .{ "i64", ConversionSpecifier.i64 },
+                    .{ "isize", ConversionSpecifier.isize },
                     .{ "f16", ConversionSpecifier.f16 },
                     .{ "f32", ConversionSpecifier.f32 },
                     .{ "f64", ConversionSpecifier.f64 },
@@ -192,8 +215,8 @@ pub fn formatStr(writer: *std.io.Writer, format_str: []const u8, arg_stream: *st
                 inline for (spec_lookup) |spec_pair| if (std.mem.eql(u8, spec_pair.@"0", base_spec_str)) {
                     const base_spec = spec_pair.@"1";
 
-                    var spec = base_spec;
-                    spec = spec; // modify this
+                    var spec: ConversionSpecifier = base_spec;
+                    spec.kind = if (spec_is_array) ConversionSpecifier.Kind.array else .value;
                     _ = spec_args;
 
                     try formatElement(writer_, .{ .conversion_specifier = spec }, arg_stream_);
@@ -234,16 +257,30 @@ pub fn formatStr(writer: *std.io.Writer, format_str: []const u8, arg_stream: *st
 }
 
 test formatStr {
+    std.testing.log_level = .debug;
+
     var out_buffer: [128]u8 = undefined;
     var fixed_writer = std.io.Writer.fixed(&out_buffer);
 
     const arg_buffer = [_]u8{
         123,
         0xdb, 0x0f, 0x49, 0x40, // pi
+
+        0x04, 0x00, 0x00, 0x00,
+        0x01, 0x00, 0x00, 0x00,
+        0x02, 0x00, 0x00, 0x00,
+        0x03, 0x00, 0x00, 0x00,
+        0xff, 0xff, 0xff, 0xff,
+
+        0x0D, 0x00, 0x00, 0x00,
+        'H',  'e',  'l',  'l',
+        'o',  ',',  ' ',  'w',
+        'o',  'r',  'l',  'd',
+        '!',
     };
     var fixed_reader = std.io.Reader.fixed(&arg_buffer);
 
-    try formatStr(&fixed_writer, "Value: {u8}, pi = {f32}", &fixed_reader);
+    try formatStr(&fixed_writer, "Value: {u8}, pi = {f32}, arr of i32 = {[]i32}, str = {[]u8}", &fixed_reader);
 
     std.log.debug("{s}", .{fixed_writer.buffer[0..fixed_writer.end]});
 }
