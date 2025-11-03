@@ -1,262 +1,273 @@
 const std = @import("std");
 
-pub const BasicSpecifier = union(enum) {
-    int: struct {
-        underlying: std.builtin.Type.Int,
-        base: u8 = 10,
-        case: std.fmt.Case = .lower,
-        options: std.fmt.Options = .{},
-
-        pub fn from(comptime T: type) @This() {
-            return .{
-                .underlying = @typeInfo(T).int,
-            };
-        }
-    },
-    float: struct {
-        underlying: std.builtin.Type.Float,
-        options: std.fmt.Number = .{},
-
-        pub fn from(comptime T: type) @This() {
-            return .{
-                .underlying = @typeInfo(T).float,
-            };
-        }
-    },
+pub const FormatError = error{
+    UnknownSpecifier,
+    FailedToReadArg,
+    FailedToWrite,
+    BadArgData,
 };
 
-pub const ConversionSpecifier = struct {
-    pub const Kind = enum {
-        value,
-        array,
-    };
+pub const ConversionFunction = fn (
+    out_writer: *std.io.Writer,
+    arg_reader: *std.io.Reader,
+    options: []const u8,
+) FormatError!void;
 
-    kind: Kind = .value,
-    basic_specifier: BasicSpecifier,
+pub const SerializationError = error{
+    FailedToWrite,
+    BadType,
+};
 
-    pub const @"u8": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(u8) } };
-    pub const @"u16": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(u16) } };
-    pub const @"u32": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(u32) } };
-    pub const @"u64": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(u64) } };
-    pub const @"usize": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(usize) } };
-    pub const @"i8": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(i8) } };
-    pub const @"i16": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(i16) } };
-    pub const @"i32": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(i32) } };
-    pub const @"i64": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(i64) } };
-    pub const @"isize": ConversionSpecifier = .{ .basic_specifier = .{ .int = .from(isize) } };
-    pub const @"f16": ConversionSpecifier = .{ .basic_specifier = .{ .float = .from(f16) } };
-    pub const @"f32": ConversionSpecifier = .{ .basic_specifier = .{ .float = .from(f32) } };
-    pub const @"f64": ConversionSpecifier = .{ .basic_specifier = .{ .float = .from(f64) } };
+pub const SerializationFunction = fn (
+    out_writer: *std.io.Writer,
+    v: anytype,
+) SerializationError!void;
+
+const ConversionTuple = struct {
+    specifier: []const u8,
+    convert: ConversionFunction,
+    serialize: SerializationFunction,
 };
 
 pub const FormatElement = union(enum) {
-    utf8_literal: []const u8,
-    conversion_specifier: ConversionSpecifier,
-
-    pub const @"u8": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(u8) } } };
-    pub const @"u16": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(u16) } } };
-    pub const @"u32": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(u32) } } };
-    pub const @"u64": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(u64) } } };
-    pub const @"usize": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(usize) } } };
-    pub const @"i8": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(i8) } } };
-    pub const @"i16": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(i16) } } };
-    pub const @"i32": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(i32) } } };
-    pub const @"i64": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(i64) } } };
-    pub const @"isize": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .int = .from(isize) } } };
-    pub const @"f16": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .float = .from(f16) } } };
-    pub const @"f32": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .float = .from(f32) } } };
-    pub const @"f64": FormatElement = .{ .conversion_specifier = .{ .basic_specifier = .{ .float = .from(f64) } } };
+    literal: []const u8,
+    conversion_specifier: struct {
+        specifier: []const u8,
+        options: []const u8,
+    },
 };
 
-fn formatElement(writer: *std.io.Writer, elem: FormatElement, arg_reader: *std.io.Reader) !void {
-    const readBasic = struct {
-        fn aufruf(arg_reader_: *std.io.Reader, comptime T: type) !T {
-            var buf: [@sizeOf(T)]u8 = undefined;
-            try arg_reader_.readSliceAll(&buf);
-            return @bitCast(buf);
-        }
-    }.aufruf;
-
-    const specifier = switch (elem) {
-        .utf8_literal => |v| {
-            try writer.writeAll(v);
-            return;
-        },
-        .conversion_specifier => |v| v,
-    };
-
-    const count = switch (specifier.kind) {
-        .array => @as(usize, @intCast(try readBasic(arg_reader, u32))),
-        .value => 1,
-    };
-
-    const bs_is_character = switch (specifier.basic_specifier) {
-        .int => |v| true and v.underlying.signedness == .unsigned and v.underlying.bits == 8 and v.base == 10 and v.case == .lower,
-        .float => false,
-    };
-
-    const value_is_string = specifier.kind == .array and bs_is_character;
-
-    if (value_is_string) {
-        try writer.writeByte('"');
-    } else if (specifier.kind == .array) {
-        try writer.writeByte('[');
+const conversion_functions = struct {
+    fn readType(comptime T: type, arg_reader: *std.io.Reader) FormatError!T {
+        var buf: [@sizeOf(T)]u8 = undefined;
+        arg_reader.readSliceAll(&buf) catch {
+            return FormatError.FailedToReadArg;
+        };
+        const v: T = @bitCast(buf);
+        return v;
     }
 
-    // special case
-    if (value_is_string) {
-        try arg_reader.streamExact(writer, count);
-    } else for (0..count) |i| {
-        if (i != 0) try writer.writeAll(", ");
-        switch (specifier.basic_specifier) {
-            .int => |v| try switch (v.underlying.signedness) {
-                .signed => switch (v.underlying.bits) {
-                    8 => writer.printInt(try readBasic(arg_reader, i8), v.base, v.case, v.options),
-                    16 => writer.printInt(try readBasic(arg_reader, i16), v.base, v.case, v.options),
-                    32 => writer.printInt(try readBasic(arg_reader, i32), v.base, v.case, v.options),
-                    64 => writer.printInt(try readBasic(arg_reader, i64), v.base, v.case, v.options),
-                    else => @panic("unsupported integer width"),
-                },
-                .unsigned => switch (v.underlying.bits) {
-                    8 => writer.printInt(try readBasic(arg_reader, u8), v.base, v.case, v.options),
-                    16 => writer.printInt(try readBasic(arg_reader, u16), v.base, v.case, v.options),
-                    32 => writer.printInt(try readBasic(arg_reader, u32), v.base, v.case, v.options),
-                    64 => writer.printInt(try readBasic(arg_reader, u64), v.base, v.case, v.options),
-                    else => @panic("unsupported integer width"),
-                },
+    const ScalarKind = enum {
+        int,
+        float,
+    };
+
+    fn convertForScalar(comptime T: type) ConversionFunction {
+        const kind = switch (@typeInfo(T)) {
+            .int => ScalarKind.int,
+            .float => ScalarKind.float,
+            else => unreachable,
+        };
+
+        return struct {
+            fn aufruf(
+                out_writer: *std.io.Writer,
+                arg_reader: *std.io.Reader,
+                options: []const u8,
+            ) FormatError!void {
+                const v = try readType(T, arg_reader);
+
+                const base: u8, const case: std.fmt.Case = if (options.len == 1)
+                    switch (options[0]) {
+                        'o' => .{ 8, .lower },
+                        'x' => .{ 16, .lower },
+                        'X' => .{ 16, .upper },
+                        else => .{ 10, .lower },
+                    }
+                else
+                    .{ 10, .lower };
+
+                switch (kind) {
+                    .int => out_writer.printInt(v, base, case, .{}) catch return FormatError.FailedToWrite,
+                    .float => out_writer.printFloat(v, .{}) catch return FormatError.FailedToWrite,
+                }
+            }
+        }.aufruf;
+    }
+
+    fn serializeForScalar(comptime T: type) SerializationFunction {
+        const kind = switch (@typeInfo(T)) {
+            .int => ScalarKind.int,
+            .float => ScalarKind.float,
+            else => unreachable,
+        };
+
+        return struct {
+            fn aufruf(writer: *std.io.Writer, v: anytype) SerializationError!void {
+                const U = @TypeOf(v);
+                switch (kind) {
+                    .int => if (U != T and U != comptime_int) return SerializationError.BadType,
+                    .float => if (U != T and U != comptime_float) return SerializationError.BadType,
+                }
+
+                const w: T = v;
+                const b: [@sizeOf(T)]u8 = @bitCast(w);
+
+                writer.writeAll(&b) catch {
+                    return SerializationError.FailedToWrite;
+                };
+            }
+        }.aufruf;
+    }
+
+    fn string(
+        out_writer: *std.io.Writer,
+        arg_reader: *std.io.Reader,
+        options: []const u8,
+    ) FormatError!void {
+        _ = options;
+
+        const str_size: usize = @intCast(try readType(u32, arg_reader));
+
+        arg_reader.streamExact(out_writer, str_size) catch |e| switch (e) {
+            std.io.Reader.StreamError.ReadFailed => return FormatError.FailedToReadArg,
+            std.io.Reader.StreamError.WriteFailed => return FormatError.FailedToWrite,
+            std.io.Reader.StreamError.EndOfStream => return FormatError.FailedToReadArg,
+        };
+    }
+
+    fn serializeString(writer: *std.io.Writer, v: anytype) SerializationError!void {
+        const T = @TypeOf(v);
+
+        switch (@typeInfo(T)) {
+            .pointer => |p| {
+                const is_str = p.child == u8 and p.size == .slice;
+                const is_ptr_to_str = switch (@typeInfo(p.child)) {
+                    .array => |a| a.child == u8,
+                    else => false,
+                };
+                if (!is_str and !is_ptr_to_str) return SerializationError.BadType;
             },
-            .float => |v| try switch (v.underlying.bits) {
-                16 => writer.printFloat(try readBasic(arg_reader, f16), v.options),
-                32 => writer.printFloat(try readBasic(arg_reader, f32), v.options),
-                64 => writer.printFloat(try readBasic(arg_reader, f64), v.options),
-                else => @panic("unsupported float width"),
+            else => return SerializationError.BadType,
+        }
+
+        const w: []const u8 = v;
+
+        writer.writeInt(u32, @as(u32, @intCast(w.len)), .little) catch {
+            return SerializationError.FailedToWrite;
+        };
+
+        writer.writeAll(w) catch {
+            return SerializationError.FailedToWrite;
+        };
+    }
+
+    fn tupleForScalar(comptime T: type) ConversionTuple {
+        return .{
+            .specifier = @typeName(T),
+            .convert = convertForScalar(T),
+            .serialize = serializeForScalar(T),
+        };
+    }
+};
+
+const default_pairs = [_]ConversionTuple{
+    conversion_functions.tupleForScalar(u8),
+    conversion_functions.tupleForScalar(u16),
+    conversion_functions.tupleForScalar(u32),
+    conversion_functions.tupleForScalar(u64),
+    conversion_functions.tupleForScalar(usize),
+    conversion_functions.tupleForScalar(i8),
+    conversion_functions.tupleForScalar(i16),
+    conversion_functions.tupleForScalar(i32),
+    conversion_functions.tupleForScalar(i64),
+    conversion_functions.tupleForScalar(isize),
+    conversion_functions.tupleForScalar(f32),
+    conversion_functions.tupleForScalar(f64),
+    .{
+        .specifier = "s",
+        .convert = conversion_functions.string,
+        .serialize = conversion_functions.serializeString,
+    },
+};
+
+pub const FormatStrIterator = struct {
+    full_str: []const u8,
+    index: usize = 0,
+
+    pub fn init(str: []const u8) FormatStrIterator {
+        return .{
+            .full_str = str,
+        };
+    }
+
+    pub fn next(self: *FormatStrIterator) ?FormatElement {
+        const view = self.full_str[self.index..];
+
+        if (view.len == 0) return null;
+        if (view.len == 1) {
+            self.index += 1;
+            return FormatElement{ .literal = view };
+        }
+
+        const escapes = [_]struct { []const u8, []const u8 }{
+            .{ "{{", "{" },
+            .{ "}}", "}" },
+        };
+
+        for (escapes) |escape_pair| {
+            const if_seen, const then_emit = escape_pair;
+
+            if (!std.mem.eql(u8, if_seen, view[0..2])) continue;
+
+            self.index += 2;
+            return FormatElement{ .literal = then_emit };
+        }
+
+        if (view[0] != '{') {
+            const idx = std.mem.indexOfScalar(u8, view, '{') orelse view.len;
+
+            self.index += idx;
+            return FormatElement{ .literal = view[0..idx] };
+        }
+
+        const end_idx = std.mem.indexOfScalarPos(u8, view, 1, '}') orelse {
+            self.index += view.len;
+            return FormatElement{ .literal = view };
+        };
+
+        const specifier_and_options = view[1..end_idx];
+
+        const specifier, const options = if (std.mem.indexOfScalar(u8, specifier_and_options, ':')) |split_at|
+            .{ specifier_and_options[0..split_at], specifier_and_options[split_at + 1 ..] }
+        else
+            .{ specifier_and_options[0..], "" };
+
+        self.index += end_idx + 1;
+        return FormatElement{ .conversion_specifier = .{
+            .specifier = specifier,
+            .options = options,
+        } };
+    }
+};
+
+pub fn format(writer: *std.io.Writer, format_str: []const u8, arg_reader: *std.io.Reader) FormatError!void {
+    var iter: FormatStrIterator = .init(format_str);
+    while (iter.next()) |elem| {
+        switch (elem) {
+            .literal => |literal_str| {
+                writer.writeAll(literal_str) catch |e| switch (e) {
+                    std.io.Writer.Error.WriteFailed => return FormatError.FailedToWrite,
+                };
+            },
+            .conversion_specifier => |sno| {
+                var converted: bool = false;
+
+                inline for (default_pairs) |pair| {
+                    if (std.mem.eql(u8, pair.specifier, sno.specifier)) {
+                        std.debug.assert(!converted);
+                        converted = true;
+                        try pair.convert(writer, arg_reader, sno.options);
+                    }
+                }
+
+                if (!converted) return FormatError.UnknownSpecifier;
             },
         }
     }
-
-    if (value_is_string) {
-        try writer.writeByte('"');
-    } else if (specifier.kind == .array) {
-        try writer.writeByte(']');
-    }
-}
-
-pub fn format(writer: *std.io.Writer, elems: []const FormatElement, arg_reader: *std.io.Reader) !void {
-    for (elems) |elem| try formatElement(writer, elem, arg_reader);
 }
 
 test format {
-    var out_buffer: [128]u8 = undefined;
-    var fixed_writer = std.io.Writer.fixed(&out_buffer);
-
-    const arg_buffer = [_]u8{
-        123,
-    };
-    var fixed_reader = std.io.Reader.fixed(&arg_buffer);
-
-    try format(&fixed_writer, &.{
-        FormatElement{ .utf8_literal = "Value: " },
-        FormatElement.u8,
-    }, &fixed_reader);
-
-    std.log.debug("{s}", .{fixed_writer.buffer[0..fixed_writer.end]});
-}
-
-pub fn formatStr(writer: *std.io.Writer, format_str: []const u8, arg_stream: *std.io.Reader) !void {
-    const processView = struct {
-        fn aufruf(writer_: *std.io.Writer, view: []const u8, arg_stream_: *std.io.Reader, finish: bool) !enum {
-            @"continue",
-            consume,
-            consume_again,
-        } {
-            if (view.len == 0) return .@"continue";
-
-            const escapes = .{
-                .{ "{{", "{" },
-                .{ "}}", "}" },
-            };
-
-            inline for (escapes) |escape_pair| if (std.mem.eql(u8, view, escape_pair.@"0")) {
-                try writer_.writeAll(escape_pair.@"1");
-                return .consume;
-            };
-
-            if (view[0] == '{') {
-                if (view[view.len - 1] != '}') {
-                    return .@"continue";
-                }
-
-                const spec_str = view[1 .. view.len - 1];
-
-                const maybe_arg_split = std.mem.indexOfScalar(u8, spec_str, ':');
-
-                const full_spec_str = spec_str[0 .. maybe_arg_split orelse spec_str.len];
-                const spec_is_array = std.mem.startsWith(u8, full_spec_str, "[]");
-                const base_spec_str = if (spec_is_array) full_spec_str[2..] else full_spec_str;
-
-                const spec_args = spec_str[maybe_arg_split orelse spec_str.len ..];
-
-                const spec_lookup = .{
-                    .{ "u8", ConversionSpecifier.u8 },
-                    .{ "u16", ConversionSpecifier.u16 },
-                    .{ "u32", ConversionSpecifier.u32 },
-                    .{ "u64", ConversionSpecifier.u64 },
-                    .{ "usize", ConversionSpecifier.usize },
-                    .{ "i8", ConversionSpecifier.i8 },
-                    .{ "i16", ConversionSpecifier.i16 },
-                    .{ "i32", ConversionSpecifier.i32 },
-                    .{ "i64", ConversionSpecifier.i64 },
-                    .{ "isize", ConversionSpecifier.isize },
-                    .{ "f16", ConversionSpecifier.f16 },
-                    .{ "f32", ConversionSpecifier.f32 },
-                    .{ "f64", ConversionSpecifier.f64 },
-                };
-
-                inline for (spec_lookup) |spec_pair| if (std.mem.eql(u8, spec_pair.@"0", base_spec_str)) {
-                    const base_spec = spec_pair.@"1";
-
-                    var spec: ConversionSpecifier = base_spec;
-                    spec.kind = if (spec_is_array) ConversionSpecifier.Kind.array else .value;
-                    _ = spec_args;
-
-                    try formatElement(writer_, .{ .conversion_specifier = spec }, arg_stream_);
-                };
-
-                return .consume;
-            }
-
-            if (view[view.len - 1] == '{') {
-                const lit = view[0 .. view.len - 1];
-                try formatElement(writer_, .{ .utf8_literal = lit }, undefined);
-                return .consume_again;
-            }
-
-            if (finish) {
-                try writer_.writeAll(view);
-                return .consume;
-            }
-
-            return .@"continue";
-        }
-    }.aufruf;
-
-    var cur_start: usize = 0;
-
-    for (0..format_str.len) |cur_end| {
-        const cur_view = format_str[cur_start..cur_end];
-
-        // std.log.debug("{s}", .{cur_view});
-        switch (try processView(writer, cur_view, arg_stream, false)) {
-            .@"continue" => {},
-            .consume => cur_start = cur_end,
-            .consume_again => cur_start = cur_end - 1,
-        }
-    }
-
-    _ = try processView(writer, format_str[cur_start..], arg_stream, true);
-}
-
-test formatStr {
     std.testing.log_level = .debug;
 
     var out_buffer: [128]u8 = undefined;
@@ -266,11 +277,11 @@ test formatStr {
         123,
         0xdb, 0x0f, 0x49, 0x40, // pi
 
-        0x04, 0x00, 0x00, 0x00,
-        0x01, 0x00, 0x00, 0x00,
-        0x02, 0x00, 0x00, 0x00,
-        0x03, 0x00, 0x00, 0x00,
-        0xff, 0xff, 0xff, 0xff,
+        // 0x04, 0x00, 0x00, 0x00,
+        // 0x01, 0x00, 0x00, 0x00,
+        // 0x02, 0x00, 0x00, 0x00,
+        // 0x03, 0x00, 0x00, 0x00,
+        // 0xff, 0xff, 0xff, 0xff,
 
         0x0D, 0x00, 0x00, 0x00,
         'H',  'e',  'l',  'l',
@@ -280,7 +291,125 @@ test formatStr {
     };
     var fixed_reader = std.io.Reader.fixed(&arg_buffer);
 
-    try formatStr(&fixed_writer, "Value: {u8}, pi = {f32}, arr of i32 = {[]i32}, str = {[]u8}", &fixed_reader);
+    try format(&fixed_writer, "Value: {u8}, pi = {f32}, str = {s}", &fixed_reader);
 
     std.log.debug("{s}", .{fixed_writer.buffer[0..fixed_writer.end]});
+}
+
+pub fn serializeArguments(writer: *std.io.Writer, format_str: []const u8, args: anytype) !void {
+    var iter: FormatStrIterator = .init(format_str);
+
+    inline for (args) |arg| {
+        const specifier_for_arg = while (true) {
+            const res = iter.next() orelse return error.MismatchedFormatStringAndArgs;
+
+            const specifier = switch (res) {
+                .literal => continue,
+                .conversion_specifier => |sno| sno.specifier,
+            };
+
+            break specifier;
+        };
+
+        var serialized: bool = false;
+
+        inline for (default_pairs) |pair| {
+            if (std.mem.eql(u8, pair.specifier, specifier_for_arg)) {
+                std.debug.assert(!serialized);
+                serialized = true;
+                try pair.serialize(writer, arg);
+            }
+        }
+
+        if (!serialized) return FormatError.UnknownSpecifier;
+    }
+}
+
+test serializeArguments {
+    const alloc = std.testing.allocator;
+
+    var writer: std.io.Writer.Allocating = .init(alloc);
+    defer writer.deinit();
+
+    try serializeArguments(&writer.writer, "{f32}, asdasd {i16}, {s}, aaaaaaaAAA {{{s}", .{
+        3.1415926535,
+        @as(i16, 1337),
+        "Hello, world!",
+        @errorName(error.Asdf),
+    });
+
+    const res = try writer.toOwnedSlice();
+    defer alloc.free(res);
+
+    // zig fmt: off
+    try std.testing.expectEqualSlices(u8, &.{
+        0xdb, 0x0f, 0x49, 0x40, // pi
+        0x39, 0x05, // 1337
+
+        0x0D, 0x00, 0x00, 0x00,
+        'H',  'e', 'l',  'l',
+        'o',  ',', ' ',  'w',
+        'o',  'r', 'l',  'd',
+        '!',
+
+        0x04, 0x00, 0x00, 0x00,
+        'A',  's',  'd',  'f',
+    }, res);
+    // zig fmt: on
+}
+
+// std.io.Writer.Discarding has references to files
+const Discarding = struct {
+    count: usize,
+    writer: std.io.Writer,
+
+    pub fn init(buffer: []u8) Discarding {
+        return .{
+            .count = 0,
+            .writer = .{
+                .vtable = &.{
+                    .drain = Discarding.drain,
+                },
+                .buffer = buffer,
+            },
+        };
+    }
+
+    pub fn fullCount(d: *const Discarding) usize {
+        return d.count + d.writer.end;
+    }
+
+    pub fn drain(w: *std.io.Writer, data: []const []const u8, splat: usize) std.io.Writer.Error!usize {
+        const d: *Discarding = @alignCast(@fieldParentPtr("writer", w));
+        const slice = data[0 .. data.len - 1];
+        const pattern = data[slice.len];
+        var written: usize = pattern.len * splat;
+        for (slice) |bytes| written += bytes.len;
+        d.count += w.end + written;
+        w.end = 0;
+        return written;
+    }
+};
+
+pub fn serializeArgumentsAlloc(alloc: std.mem.Allocator, format_str: []const u8, args: anytype) ![]const u8 {
+    var counting_writer: Discarding = .init(&.{});
+    try serializeArguments(&counting_writer.writer, format_str, args);
+    const count: usize = @intCast(counting_writer.fullCount());
+
+    const buf = try alloc.alloc(u8, count);
+    errdefer alloc.free(buf);
+
+    var fb_writer = std.io.Writer.fixed(buf);
+    try serializeArguments(&fb_writer, format_str, args);
+
+    return buf;
+}
+
+test serializeArgumentsAlloc {
+    const alloc = std.testing.allocator;
+
+    const res = try serializeArgumentsAlloc(alloc, "asd: {s}", .{"asd"});
+    defer alloc.free(res);
+
+    try std.testing.expectEqualSlices(u8, &.{0x03, 0x00, 0x00, 0x00, 'a', 's', 'd'}, res);
 }

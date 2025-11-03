@@ -411,13 +411,19 @@ pub fn NextFitAllocator(config: Config) type {
             return allocation.getData().ptr;
         }
 
-        pub fn deallocateBytes(self: *Self, data: []u8, alignment: std.mem.Alignment) void {
-            const allocation = Allocation.fromDataPtr(data.ptr);
+        pub fn deallocateBytesImpl(self: *Self, data: [*]u8, maybe_check_info: ?struct {
+            length: usize,
+            alignment: std.mem.Alignment,
+        }) void {
+            const allocation = Allocation.fromDataPtr(data);
             const header = allocation.getHeader().*;
 
-            allocation.checkHeaderConsistency(data, alignment);
-            if (!std.mem.isAligned(@intFromPtr(data.ptr), alignment.toByteUnits())) {
-                @panic("bad alignment");
+            if (maybe_check_info) |check_info| {
+                allocation.checkHeaderConsistency(data[0..check_info.length], check_info.alignment);
+
+                if (!std.mem.isAligned(@intFromPtr(data), check_info.alignment.toByteUnits())) {
+                    @panic("bad alignment");
+                }
             }
 
             switch (config.check_canaries) {
@@ -434,6 +440,13 @@ pub fn NextFitAllocator(config: Config) type {
 
             // if header.next is null, this was the only allocation.
             if (header.prev == null) self.first_allocation_at = header.next;
+        }
+
+        pub fn deallocateBytes(self: *Self, data: []u8, alignment: std.mem.Alignment) void {
+            self.deallocateBytesImpl(data.ptr, .{
+                .length = data.len,
+                .alignment = alignment,
+            });
         }
 
         pub fn debug(self: Self) void {
