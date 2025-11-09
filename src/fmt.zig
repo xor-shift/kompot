@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const kompot = @import("root.zig");
+
 pub const FormatError = error{
     UnknownSpecifier,
     FailedToReadArg,
@@ -358,41 +360,10 @@ test serializeArguments {
     // zig fmt: on
 }
 
-// std.io.Writer.Discarding has references to files
-const Discarding = struct {
-    count: usize,
-    writer: std.io.Writer,
-
-    pub fn init(buffer: []u8) Discarding {
-        return .{
-            .count = 0,
-            .writer = .{
-                .vtable = &.{
-                    .drain = Discarding.drain,
-                },
-                .buffer = buffer,
-            },
-        };
-    }
-
-    pub fn fullCount(d: *const Discarding) usize {
-        return d.count + d.writer.end;
-    }
-
-    pub fn drain(w: *std.io.Writer, data: []const []const u8, splat: usize) std.io.Writer.Error!usize {
-        const d: *Discarding = @alignCast(@fieldParentPtr("writer", w));
-        const slice = data[0 .. data.len - 1];
-        const pattern = data[slice.len];
-        var written: usize = pattern.len * splat;
-        for (slice) |bytes| written += bytes.len;
-        d.count += w.end + written;
-        w.end = 0;
-        return written;
-    }
-};
-
 pub fn serializeArgumentsAlloc(alloc: std.mem.Allocator, format_str: []const u8, args: anytype) ![]const u8 {
-    var counting_writer: Discarding = .init(&.{});
+    const DiscardingWriterNoFiles = kompot.DiscardingWriterNoFiles;
+
+    var counting_writer: DiscardingWriterNoFiles = .init(&.{});
     try serializeArguments(&counting_writer.writer, format_str, args);
     const count: usize = @intCast(counting_writer.fullCount());
 
@@ -411,5 +382,5 @@ test serializeArgumentsAlloc {
     const res = try serializeArgumentsAlloc(alloc, "asd: {s}", .{"asd"});
     defer alloc.free(res);
 
-    try std.testing.expectEqualSlices(u8, &.{0x03, 0x00, 0x00, 0x00, 'a', 's', 'd'}, res);
+    try std.testing.expectEqualSlices(u8, &.{ 0x03, 0x00, 0x00, 0x00, 'a', 's', 'd' }, res);
 }
