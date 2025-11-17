@@ -11,9 +11,7 @@ pub const Config = struct {
         0xcd, 0x6e, 0x31, 0x10,
     },
 
-    /// Only this one is used if `decaying_free_marks` is false
-    free_mark_lo: u8 = 0x40,
-    free_mark_hi: u8 = 0x50,
+    free_mark: u8 = 0x41,
 
     padding_mark_header: u8 = 0xFD,
     padding_mark_data: u8 = 0xFC,
@@ -38,9 +36,6 @@ pub const Config = struct {
         self_on_alloc,
         everyone_on_alloc,
     } = .never,
-
-    // HUGE performance impact
-    decaying_free_marks: bool = false,
 };
 
 /// Use this allocator only if you've got nothing else. It's terrible and a
@@ -289,6 +284,55 @@ pub fn NextFitAllocator(config: Config) type {
             return .{
                 .curr = self.first_allocation_at,
             };
+        }
+
+        pub const Statistics = struct {
+            num_active_allocations: usize,
+            num_free_regions: usize,
+            largest_free_region: usize,
+
+            bytes_data: usize,
+            bytes_total: usize,
+            bytes_free_upto_last_alloc: usize,
+            bytes_free_after_last_alloc: usize,
+        };
+
+        pub fn stats(self: Self) Statistics {
+            var ret = std.mem.zeroes(Statistics);
+
+            var iter = self.iterate();
+            var maybe_prev_allocation: ?Allocation = null;
+            while (iter.next()) |allocation| {
+                defer maybe_prev_allocation = allocation;
+
+                const ptrs = allocation.getPointers();
+
+                if (maybe_prev_allocation) |prev_allocation| {
+                    const free_bytes_before = allocation.header_ptr - prev_allocation.firstPtrAfter();
+
+                    ret.num_free_regions += 1;
+                    ret.bytes_free_upto_last_alloc += free_bytes_before;
+                    ret.largest_free_region = @max(ret.largest_free_region, free_bytes_before);
+                } else if (allocation.header_ptr != self.heap.ptr) {
+                    const free_bytes_before = allocation.header_ptr - self.heap.ptr;
+
+                    ret.num_free_regions += 1;
+                    ret.bytes_free_upto_last_alloc += free_bytes_before;
+                    ret.largest_free_region = @max(ret.largest_free_region, free_bytes_before);
+                }
+
+                ret.num_active_allocations += 1;
+
+                ret.bytes_data += ptrs.data_end - ptrs.data_start;
+                ret.bytes_total += ptrs.posterior_canary_end - ptrs.header_start;
+            }
+
+            ret.bytes_free_after_last_alloc = if (maybe_prev_allocation) |last_allocation|
+                self.heap.ptr + self.heap.len - last_allocation.firstPtrAfter()
+            else
+                self.heap.len;
+
+            return ret;
         }
 
         fn findFit(self: Self, length: usize, alignment: std.mem.Alignment) ?struct {

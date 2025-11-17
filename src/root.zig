@@ -2,7 +2,7 @@ pub const algorithm = @import("algorithm.zig");
 pub const bit = @import("bit.zig");
 pub const cobs = @import("cobs.zig");
 pub const curves = @import("curves.zig");
-pub const fmt = @import("fmt.zig");
+pub const fmt = @import("fmt/root.zig");
 pub const ring_buffer = @import("ring_buffer.zig");
 
 pub const coro = @import("coro/root.zig");
