@@ -114,6 +114,30 @@ fn serializeString(writer: *std.io.Writer, v: anytype) fmt.SerializationError!vo
     };
 }
 
+fn convertBool(
+    out_writer: *std.io.Writer,
+    arg_reader: *std.io.Reader,
+    options: []const u8,
+) fmt.FormatError!void {
+    _ = options;
+
+    var val: u8 = undefined;
+    arg_reader.readSliceAll((&val)[0..1]) catch |e| switch (e) {
+        std.io.Reader.Error.ReadFailed => return fmt.FormatError.FailedToReadArg,
+        std.io.Reader.Error.EndOfStream => return fmt.FormatError.FailedToReadArg,
+    };
+
+    out_writer.writeAll(if (val == 0) "false" else "true") catch return fmt.FormatError.FailedToWrite;
+}
+
+fn serializeBool(writer: *std.io.Writer, v: anytype) fmt.SerializationError!void {
+    const T = @TypeOf(v);
+
+    if (T != bool) return fmt.SerializationError.BadType;
+
+    writer.writeByte(@as(u8, @intCast(@intFromBool(v)))) catch return fmt.SerializationError.FailedToWrite;
+}
+
 fn tupleForScalar(comptime T: type) fmt.ConversionTuple {
     return .{
         .conversion_specifier = @typeName(T),
@@ -139,5 +163,10 @@ pub const tuples = [_]fmt.ConversionTuple{
         .conversion_specifier = "s",
         .conversion_function = convertString,
         .serialization_function = serializeString,
+    },
+    .{
+        .conversion_specifier = "bool",
+        .conversion_function = convertBool,
+        .serialization_function = serializeBool,
     },
 };
