@@ -4,13 +4,15 @@ pub const cobs = @import("cobs.zig");
 pub const curves = @import("curves.zig");
 pub const meta = @import("meta.zig");
 pub const poly = @import("poly.zig");
-pub const ring_buffer = @import("ring_buffer.zig");
+const ring_buffer = @import("ring_buffer.zig");
 
 // pub const coro = @import("coro/root.zig");
 pub const fmt = @import("fmt/root.zig");
 pub const heap = @import("heap/root.zig");
 pub const thread = @import("thread/root.zig");
 pub const wgm = @import("wgm/root.zig");
+
+pub const RingBuffer = ring_buffer.RingBuffer;
 
 const std = @import("std");
 

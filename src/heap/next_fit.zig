@@ -123,6 +123,21 @@ pub fn NextFitAllocator(config: Config) type {
             };
         }
 
+        pub fn allocationInfo(self: Self, ptr: *const anyopaque) ?struct {
+            length: usize,
+            alignment: std.mem.Alignment,
+        } {
+            _ = self;
+
+            const allocation: Allocation = .fromDataPtr(@ptrCast(@constCast(ptr)));
+            const header = allocation.getHeader();
+
+            return .{
+                .length = header.length,
+                .alignment = header.alignment,
+            };
+        }
+
         const Allocation = struct {
             const Header = struct {
                 length: usize,
