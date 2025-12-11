@@ -2,11 +2,12 @@ pub const algorithm = @import("algorithm.zig");
 pub const bit = @import("bit.zig");
 pub const cobs = @import("cobs.zig");
 pub const curves = @import("curves.zig");
-pub const fmt = @import("fmt/root.zig");
+pub const meta = @import("meta.zig");
+pub const poly = @import("poly.zig");
 pub const ring_buffer = @import("ring_buffer.zig");
 
-pub const coro = @import("coro/root.zig");
-pub const dyn = @import("dynnew/root.zig");
+// pub const coro = @import("coro/root.zig");
+pub const fmt = @import("fmt/root.zig");
 pub const heap = @import("heap/root.zig");
 pub const thread = @import("thread/root.zig");
 pub const wgm = @import("wgm/root.zig");
@@ -21,10 +22,11 @@ test {
     std.testing.refAllDecls(cobs);
     std.testing.refAllDecls(curves);
     std.testing.refAllDecls(fmt);
+    std.testing.refAllDecls(meta);
+    std.testing.refAllDecls(poly);
     std.testing.refAllDecls(ring_buffer);
 
     // std.testing.refAllDecls(coro);
-    std.testing.refAllDecls(dyn);
     std.testing.refAllDecls(heap);
     std.testing.refAllDecls(thread);
     std.testing.refAllDecls(wgm);
@@ -66,3 +68,43 @@ pub const DiscardingWriterNoFiles = struct {
         return written;
     }
 };
+
+/// Splits a doubly linked list s.t. `split_at` is the last element of the
+/// first returned list.
+pub fn splitDoublyLinkedList(
+    list: std.DoublyLinkedList,
+    split_at: *std.DoublyLinkedList.Node,
+) [2]std.DoublyLinkedList {
+    // edge cases:
+    // split_at == list.first:
+    //  - split_at.prev will be null
+    //  - split_at.next will be set to null
+    //  this is fine
+    //
+    // split_at == list.last:
+    //   doesn't concern lhs
+    const lhs: std.DoublyLinkedList = .{
+        .first = list.first,
+        .last = split_at,
+    };
+
+    // split_at == list.first:
+    //  since split_at.next is set to null, rhs.first will be null
+    //
+    // split_at == list.last:
+    //   split_at will be a member of lhs so this is an issue
+
+    const rhs: std.DoublyLinkedList = if (split_at == list.last)
+        .{}
+    else blk: {
+        split_at.next.?.prev = null;
+        break :blk .{
+            .first = split_at.next,
+            .last = list.last,
+        };
+    };
+
+    split_at.next = null;
+
+    return .{ lhs, rhs };
+}

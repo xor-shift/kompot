@@ -4,13 +4,9 @@ pub const TaskStatus = enum {
     /// The task may or may not be executing but it can be resumed freely.
     running,
 
-    /// The task doesn't want to be resumed until the next wakeup event.
-    ///
-    /// This status may be interpreted by implementations to be equivalent to
-    /// `waiting`.
-    sleeping,
     /// The task won't be resumed until unsuspend is called on it
-    suspended,
+    // suspended,
+
     /// The task has exited and the resources may be freed upon the next yield
     terminated,
 };
