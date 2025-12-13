@@ -2,6 +2,43 @@ const std = @import("std");
 
 const Canary = [16]u8;
 
+const util = struct {
+    // Returns the space available between `start` and `end` (`end` not
+    // inclusive) after aligning to `byte_alignmnt` as a slice.
+    fn spaceAfterAlignment(
+        start: [*]u8,
+        end: [*]u8,
+        comptime byte_alignment: usize,
+    ) ?[]align(byte_alignment) u8 {
+        const offset_to_start = std.mem.alignPointerOffset(start, byte_alignment) orelse return null;
+        const header_start: [*]align(byte_alignment) u8 = @alignCast(start + offset_to_start);
+
+        const space = end - start;
+        const skipped = header_start - start;
+        if (skipped > space) return null;
+
+        return header_start[0 .. space - skipped];
+    }
+
+    test spaceAfterAlignment {
+        var asd: [256]u8 align(16) = undefined;
+        const start = asd[0..].ptr;
+        const end = asd[0..].ptr + asd.len;
+
+        try std.testing.expectEqual(asd[0..], spaceAfterAlignment(start, end, 1));
+        try std.testing.expectEqual(asd[0..], spaceAfterAlignment(start, end, 2));
+        try std.testing.expectEqual(asd[0..], spaceAfterAlignment(start, end, 16));
+
+        try std.testing.expectEqual(asd[1..], spaceAfterAlignment(start + 1, end, 1));
+        try std.testing.expectEqual(asd[2..], spaceAfterAlignment(start + 1, end, 2));
+        try std.testing.expectEqual(asd[16..], spaceAfterAlignment(start + 1, end, 16));
+
+        try std.testing.expectEqual(asd[15..], spaceAfterAlignment(start + 15, end, 1));
+        try std.testing.expectEqual(asd[16..], spaceAfterAlignment(start + 15, end, 2));
+        try std.testing.expectEqual(asd[16..], spaceAfterAlignment(start + 15, end, 16));
+    }
+};
+
 pub const Config = struct {
     /// Bytes gotten from https://random.org/bytes. Change these if you will.
     canary_value: Canary = .{
@@ -57,40 +94,6 @@ pub fn NextFitAllocator(config: Config) type {
                 return self.allocateBytes(length, alignment);
             }
 
-            fn resize(
-                self_opaque: *anyopaque,
-                memory: []u8,
-                alignment: std.mem.Alignment,
-                new_len: usize,
-                ret_addr: usize,
-            ) bool {
-                const self: *Self = @ptrCast(@alignCast(self_opaque));
-                _ = self;
-                _ = memory;
-                _ = alignment;
-                _ = new_len;
-                _ = ret_addr;
-
-                return false;
-            }
-
-            fn remap(
-                self_opaque: *anyopaque,
-                memory: []u8,
-                alignment: std.mem.Alignment,
-                new_len: usize,
-                ret_addr: usize,
-            ) ?[*]u8 {
-                const self: *Self = @ptrCast(@alignCast(self_opaque));
-                _ = self;
-                _ = memory;
-                _ = alignment;
-                _ = new_len;
-                _ = ret_addr;
-
-                return null;
-            }
-
             fn free(
                 self_opaque: *anyopaque,
                 memory: []u8,
@@ -103,13 +106,6 @@ pub fn NextFitAllocator(config: Config) type {
             }
         };
 
-        const vtable: std.mem.Allocator.VTable = .{
-            .alloc = &VTable.alloc,
-            .resize = &VTable.resize,
-            .remap = &VTable.remap,
-            .free = &VTable.free,
-        };
-
         pub fn init(heap: []u8) Self {
             return .{
                 .heap = heap,
@@ -119,7 +115,12 @@ pub fn NextFitAllocator(config: Config) type {
         pub fn allocator(self: *Self) std.mem.Allocator {
             return .{
                 .ptr = @ptrCast(self),
-                .vtable = &Self.vtable,
+                .vtable = &std.mem.Allocator.VTable{
+                    .alloc = &VTable.alloc,
+                    .resize = std.mem.Allocator.noResize,
+                    .remap = std.mem.Allocator.noRemap,
+                    .free = &VTable.free,
+                },
             };
         }
 
@@ -232,7 +233,7 @@ pub fn NextFitAllocator(config: Config) type {
 
             fn firstPtrAfterGivenHeader(self: Allocation, header: Header) [*]u8 {
                 const pointers = self.getPointersGivenHeader(header);
-                return pointers.anterior_canary_end;
+                return pointers.posterior_canary_end;
             }
 
             fn getCanary(self: Allocation, kind: enum { anterior, posterior }) []u8 {
@@ -357,19 +358,6 @@ pub fn NextFitAllocator(config: Config) type {
         } {
             var iterator = self.iterate();
 
-            const maxAlignedSpace = struct {
-                fn aufruf(start: [*]u8, end: [*]u8, comptime byte_alignment: usize) ?[]align(byte_alignment) u8 {
-                    const offset_to_start = std.mem.alignPointerOffset(start, byte_alignment) orelse return null;
-                    const header_start: [*]align(byte_alignment) u8 = @alignCast(start + offset_to_start);
-
-                    const space = end - start;
-                    const skipped = header_start - start;
-                    if (skipped > space) return null;
-
-                    return header_start[0 .. space - skipped];
-                }
-            }.aufruf;
-
             const tryFit = struct {
                 fn aufruf(
                     empty_space_start: [*]u8,
@@ -377,7 +365,7 @@ pub fn NextFitAllocator(config: Config) type {
                     length_: usize,
                     alignment_: std.mem.Alignment,
                 ) ?Allocation {
-                    const aligned_space: []align(@alignOf(Allocation.Header)) u8 = maxAlignedSpace(
+                    const aligned_space: []align(@alignOf(Allocation.Header)) u8 = util.spaceAfterAlignment(
                         empty_space_start,
                         empty_space_end,
                         @alignOf(Allocation.Header),
@@ -392,8 +380,21 @@ pub fn NextFitAllocator(config: Config) type {
                         .alignment = alignment_,
                     });
 
-                    const used_space = end - start;
-                    if (used_space > aligned_space.len) return null;
+                    const space_that_would_be_used_by_allocation_had_we_used_the_candidate = end - start;
+                    const the_space_that_we_actually_have_available_after_alignment = aligned_space.len;
+
+                    const subjunctive = space_that_would_be_used_by_allocation_had_we_used_the_candidate;
+                    const indicative = the_space_that_we_actually_have_available_after_alignment;
+
+                    // std.log.debug("length_: {}, indicative: {}, subjunctive: {}", .{
+                    //     length_,
+                    //     indicative,
+                    //     subjunctive,
+                    // });
+
+                    if (subjunctive > indicative) return null;
+
+                    // std.log.debug("asd", .{});
 
                     return allocation;
                 }
@@ -424,6 +425,8 @@ pub fn NextFitAllocator(config: Config) type {
                     alignment,
                 ) orelse continue;
 
+                // std.log.debug("asdf", .{});
+
                 return .{
                     .raw_allocation = allocation,
                     .prev = prev,
@@ -446,12 +449,36 @@ pub fn NextFitAllocator(config: Config) type {
         }
 
         pub fn allocateBytes(self: *Self, length: usize, alignment: std.mem.Alignment) ?[*]u8 {
+            std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
+            defer self.race_detector.store(false, .release);
+
             const fit_result = self.findFit(length, alignment) orelse return null;
 
             const allocation = fit_result.raw_allocation;
 
+            if (fit_result.prev) |prev| {
+                if (fit_result.next) |next| {
+                    std.debug.assert(prev.getHeader().next == next.header_ptr);
+                    std.debug.assert(next.getHeader().prev == prev.header_ptr);
+
+                    // const after_prev = prev.firstPtrAfter();
+                    // const space = next.getPointers().posterior_canary_start - after_prev;
+                    // std.log.debug("have {}, need {}", .{ space, length });
+                }
+            }
+
             if (fit_result.prev) |prev| prev.getHeader().next = allocation.header_ptr;
             if (fit_result.next) |next| next.getHeader().prev = allocation.header_ptr;
+
+            // if (fit_result.prev) |prev| {
+            //     std.log.debug("prev allocation: {*}", .{prev.getPointers().header_start});
+            //     std.log.debug("prev.next      : {*}", .{prev.getHeader().next});
+            // } else std.log.debug("no prev allocation", .{});
+
+            // if (fit_result.next) |next| {
+            //     std.log.debug("next allocation: {*}", .{next.getPointers().header_start});
+            //     std.log.debug("next.prev      : {*}", .{next.getHeader().prev});
+            // } else std.log.debug("no next allocation", .{});
 
             allocation.getHeader().* = .{
                 .length = length,
@@ -474,6 +501,9 @@ pub fn NextFitAllocator(config: Config) type {
             length: usize,
             alignment: std.mem.Alignment,
         }) void {
+            std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
+            defer self.race_detector.store(false, .release);
+
             const allocation = Allocation.fromDataPtr(data);
             const header = allocation.getHeader().*;
 
@@ -528,18 +558,25 @@ pub fn NextFitAllocator(config: Config) type {
                 defer prev_allocation = allocation;
                 defer alloc_no += 1;
 
-                if (prev_allocation) |prev| {
-                    std.debug.assert(prev.getHeader().next == allocation.header_ptr);
-                    std.debug.assert(prev.header_ptr == allocation.getHeader().prev);
-                }
-
                 const skipped_bytes = if (prev_allocation) |prev|
                     allocation.header_ptr - prev.firstPtrAfter()
                 else
                     allocation.header_ptr - self.heap.ptr;
 
+                const pointers = allocation.getPointers();
+
                 log.debug("    ... {d} skipped bytes ...", .{skipped_bytes});
                 log.debug("    ====   allocation #{:02}   ====", .{alloc_no});
+                log.debug("      ====   pointers   ====", .{});
+                log.debug("        header_start          : {*}", .{pointers.header_start});
+                log.debug("        header_end            : {*}", .{pointers.header_end});
+                log.debug("        anterior_canary_start : {*}", .{pointers.anterior_canary_start});
+                log.debug("        anterior_canary_end   : {*}", .{pointers.anterior_canary_end});
+                log.debug("        data_start            : {*}", .{pointers.data_start});
+                log.debug("        data_end              : {*}", .{pointers.data_end});
+                log.debug("        posterior_canary_start: {*}", .{pointers.posterior_canary_start});
+                log.debug("        posterior_canary_end  : {*}", .{pointers.posterior_canary_end});
+                log.debug("      ==== pointers end ====", .{});
                 log.debug("      start      : {*}", .{allocation.header_ptr});
                 log.debug("      true length: {d}", .{allocation.firstPtrAfter() - allocation.header_ptr});
                 log.debug("      length     : {d}", .{allocation.getHeader().length});
@@ -547,6 +584,11 @@ pub fn NextFitAllocator(config: Config) type {
                 log.debug("      prev       : {*}", .{allocation.getHeader().prev});
                 log.debug("      next       : {*}", .{allocation.getHeader().next});
                 log.debug("    ==== allocation #{:02} end ====", .{alloc_no});
+
+                if (prev_allocation) |prev| {
+                    std.debug.assert(prev.getHeader().next == allocation.header_ptr);
+                    std.debug.assert(prev.header_ptr == allocation.getHeader().prev);
+                }
             }
 
             log.debug("    ... {d} more bytes ...", .{
@@ -559,18 +601,20 @@ pub fn NextFitAllocator(config: Config) type {
             log.debug("==== nfa_debug end ====", .{});
         }
 
-        heap: []u8,
+        race_detector: std.atomic.Value(bool) = .init(false),
 
+        heap: []u8,
         first_allocation_at: ?[*]align(@alignOf(Allocation.Header)) u8 = null,
     };
 }
 
 test NextFitAllocator {
-    var heap: [512]u8 = undefined;
+    const heap = try std.testing.allocator.alloc(u8, 512 * 1024);
+    defer std.testing.allocator.free(heap);
 
     const NFA = NextFitAllocator(.{});
     var nfa: NFA = .{
-        .heap = &heap,
+        .heap = heap,
     };
 
     // try std.testing.expectEqual(nfa.heap, nfa.findEmptySpace(null));
@@ -578,17 +622,81 @@ test NextFitAllocator {
     // try std.testing.expect(NFA.isFit(nfa.heap[0..], 16, .@"4") != null);
 
     const alloc = nfa.allocator();
+
     // nfa.debug();
-    const foo = try alloc.alloc(u32, 4);
+    const foo = try alloc.alloc(u8, 127);
     // nfa.debug();
-    const bar = try alloc.alloc(u32, 4);
+    const bar = try alloc.alloc(u8, 127);
     // nfa.debug();
-    const baz = try alloc.alloc(u32, 4);
+    const baz = try alloc.alloc(u8, 127);
     // nfa.debug();
     alloc.free(bar);
+    // nfa.debug();
+    const qux = try alloc.alloc(u8, 256);
     // nfa.debug();
     alloc.free(foo);
     // nfa.debug();
     alloc.free(baz);
     // nfa.debug();
+    alloc.free(qux);
+    // nfa.debug();
+
+    try std.testing.expectEqual(0, nfa.stats().num_active_allocations);
+    try std.testing.expectEqual(0, nfa.stats().bytes_data);
+    try std.testing.expectEqual(0, nfa.stats().bytes_total);
+    // try std.testing.expectEqual(0, nfa.stats().bytes_free_upto_last_alloc);
+    // try std.testing.expectEqual(0, nfa.stats().bytes_free_after_last_alloc);
+}
+
+test "known failure condition for NextFitAllocator" {
+    var heap: [2048]u8 align(16) = undefined;
+
+    const NFA = NextFitAllocator(.{});
+    var nfa: NFA = .{
+        .heap = &heap,
+    };
+
+    const alloc = nfa.allocator();
+
+    var allocations: [3][]u8 = .{
+        try alloc.alloc(u8, 127),
+        try alloc.alloc(u8, 127),
+        try alloc.alloc(u8, 127),
+    };
+
+    alloc.free(allocations[1]);
+    allocations[1] = try alloc.alloc(u8, 256);
+
+    // nfa.debug();
+    alloc.free(allocations[2]);
+    // nfa.debug();
+
+    allocations[2] = try alloc.alloc(u8, 256);
+}
+
+test "stress test of NextFitAllocator" {
+    const heap = try std.testing.allocator.alloc(u8, 512 * 1024);
+    defer std.testing.allocator.free(heap);
+
+    const NFA = NextFitAllocator(.{});
+    var nfa: NFA = .{
+        .heap = heap,
+    };
+
+    const alloc = nfa.allocator();
+
+    var test_allocations: [1024][]u8 = undefined;
+    for (0..test_allocations.len) |i| test_allocations[i] = try alloc.alloc(u8, 1);
+
+    var xoshiro = std.Random.Xoshiro256.init(@intCast(std.testing.random_seed));
+    const random = xoshiro.random();
+
+    for (0..test_allocations.len / 2) |_| {
+        const i = random.intRangeLessThan(usize, 0, test_allocations.len);
+        const l = random.intRangeLessThan(usize, 128, 255);
+        // const l = 255;
+
+        alloc.free(test_allocations[i]);
+        test_allocations[i] = try alloc.alloc(u8, l);
+    }
 }

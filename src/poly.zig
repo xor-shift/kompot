@@ -121,6 +121,23 @@ pub fn Fat(comptime kind: PtrKind, comptime IFace: type) type {
     };
 }
 
+/// The `vtable_list` argument is an array of tuples of interface types and the
+/// offset into the concrete type that points to that interface member
+///
+/// Example usage:
+/// ```zig
+/// pub const IFoo = struct {};
+///
+/// pub const Foo = struct {
+///   const Self = @This();
+///
+///   pub const PolyStatic = kompot.poly.StaticStuff(.{
+///     .{ IFoo, @offsetOf(Self, "foo") },
+///   });
+///
+///   foo: IFoo = .{},
+/// };
+/// ```
 pub fn StaticStuff(comptime vtable_list: []const struct { type, usize }) type {
     const vlist_ = comptime blk: {
         var vlist: [vtable_list.len * 3 + 1]VTableListEntry = undefined;

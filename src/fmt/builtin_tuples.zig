@@ -77,15 +77,55 @@ fn convertString(
     arg_reader: *std.io.Reader,
     options: []const u8,
 ) fmt.FormatError!void {
-    _ = options;
-
     const str_size: usize = @intCast(try readType(u32, arg_reader));
 
-    arg_reader.streamExact(out_writer, str_size) catch |e| switch (e) {
-        std.io.Reader.StreamError.ReadFailed => return fmt.FormatError.FailedToReadArg,
-        std.io.Reader.StreamError.WriteFailed => return fmt.FormatError.FailedToWrite,
-        std.io.Reader.StreamError.EndOfStream => return fmt.FormatError.FailedToReadArg,
+    const do_escape = std.mem.indexOfScalar(u8, options, 'e') != null;
+    if (!do_escape) {
+        arg_reader.streamExact(out_writer, str_size) catch |e| switch (e) {
+            std.io.Reader.StreamError.ReadFailed => return fmt.FormatError.FailedToReadArg,
+            std.io.Reader.StreamError.WriteFailed => return fmt.FormatError.FailedToWrite,
+            std.io.Reader.StreamError.EndOfStream => return fmt.FormatError.FailedToReadArg,
+        };
+
+        return;
+    }
+
+    const escapes = [_]struct { u8, u8 }{
+        .{ '\r', 'r' },
+        .{ '\n', 'n' },
+        .{ '\t', 't' },
+        .{ '\\', '\\' },
     };
+
+    // TODO: make this faster
+    //
+    // we can search for the printable range and skip
+    //
+    // searching is fast in vector ISAs
+    outer: for (0..str_size) |_| {
+        const c = arg_reader.takeByte() catch return fmt.FormatError.FailedToReadArg;
+
+        for (escapes) |escape_pair| {
+            const from = escape_pair.@"0";
+            const to = escape_pair.@"1";
+
+            if (c != from) continue;
+
+            const arr: [2]u8 = .{ '\\', to };
+            out_writer.writeAll(&arr) catch return fmt.FormatError.FailedToWrite;
+
+            continue :outer;
+        }
+
+        if (c < ' ') {
+            const c_as_hex = std.fmt.hex(c);
+            const arr: [4]u8 = .{ '\\', 'x' } ++ c_as_hex;
+
+            out_writer.writeAll(&arr) catch return fmt.FormatError.FailedToWrite;
+        }
+
+        out_writer.writeByte(c) catch return fmt.FormatError.FailedToWrite;
+    }
 }
 
 fn serializeString(writer: *std.io.Writer, v: anytype) fmt.SerializationError!void {
