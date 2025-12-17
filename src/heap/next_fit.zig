@@ -66,13 +66,6 @@ pub const Config = struct {
         everyone_on_dealloc,
         everyone_on_alloc_and_dealloc,
     } = .self_on_dealloc,
-
-    // Large performance impact
-    check_free_marks: enum {
-        never,
-        self_on_alloc,
-        everyone_on_alloc,
-    } = .never,
 };
 
 /// Use this allocator only if you've got nothing else. It's terrible and a
@@ -89,9 +82,8 @@ pub fn NextFitAllocator(config: Config) type {
                 ret_addr: usize,
             ) ?[*]u8 {
                 const self: *Self = @ptrCast(@alignCast(self_opaque));
-                _ = ret_addr;
 
-                return self.allocateBytes(length, alignment);
+                return self.allocateBytes(length, alignment, ret_addr);
             }
 
             fn free(
@@ -101,8 +93,7 @@ pub fn NextFitAllocator(config: Config) type {
                 ret_addr: usize,
             ) void {
                 const self: *Self = @ptrCast(@alignCast(self_opaque));
-                _ = ret_addr;
-                return self.deallocateBytes(memory, alignment);
+                return self.deallocateBytes(memory, alignment, ret_addr);
             }
         };
 
@@ -124,11 +115,13 @@ pub fn NextFitAllocator(config: Config) type {
             };
         }
 
-        pub fn allocationInfo(self: Self, ptr: *const anyopaque) ?struct {
+        pub fn allocationInfo(self: *Self, ptr: *const anyopaque) ?struct {
             length: usize,
             alignment: std.mem.Alignment,
         } {
-            _ = self;
+            std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
+            defer self.race_detector.store(false, .release);
+            // ^ we don't really need this here but oh well
 
             const allocation: Allocation = .fromDataPtr(@ptrCast(@constCast(ptr)));
             const header = allocation.getHeader();
@@ -143,6 +136,8 @@ pub fn NextFitAllocator(config: Config) type {
             const Header = struct {
                 length: usize,
                 alignment: std.mem.Alignment,
+                allocated_by: usize = undefined,
+                deallocated_by: usize = 0,
 
                 prev: ?[*]align(@alignOf(Header)) u8 = null,
                 next: ?[*]align(@alignOf(Header)) u8 = null,
@@ -313,7 +308,10 @@ pub fn NextFitAllocator(config: Config) type {
             bytes_free_after_last_alloc: usize,
         };
 
-        pub fn stats(self: Self) Statistics {
+        pub fn stats(self: *Self) Statistics {
+            std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
+            defer self.race_detector.store(false, .release);
+
             var ret = std.mem.zeroes(Statistics);
 
             var iter = self.iterate();
@@ -448,7 +446,12 @@ pub fn NextFitAllocator(config: Config) type {
             };
         }
 
-        pub fn allocateBytes(self: *Self, length: usize, alignment: std.mem.Alignment) ?[*]u8 {
+        pub fn allocateBytes(
+            self: *Self,
+            length: usize,
+            alignment: std.mem.Alignment,
+            ret_addr: usize,
+        ) ?[*]u8 {
             std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
             defer self.race_detector.store(false, .release);
 
@@ -483,6 +486,7 @@ pub fn NextFitAllocator(config: Config) type {
             allocation.getHeader().* = .{
                 .length = length,
                 .alignment = alignment,
+                .allocated_by = ret_addr,
 
                 .prev = if (fit_result.prev) |v| v.header_ptr else null,
                 .next = if (fit_result.next) |v| v.header_ptr else null,
@@ -497,7 +501,7 @@ pub fn NextFitAllocator(config: Config) type {
             return allocation.getData().ptr;
         }
 
-        pub fn deallocateBytesImpl(self: *Self, data: [*]u8, maybe_check_info: ?struct {
+        pub fn deallocateBytesImpl(self: *Self, data: [*]u8, ret_addr: usize, maybe_check_info: ?struct {
             length: usize,
             alignment: std.mem.Alignment,
         }) void {
@@ -505,7 +509,8 @@ pub fn NextFitAllocator(config: Config) type {
             defer self.race_detector.store(false, .release);
 
             const allocation = Allocation.fromDataPtr(data);
-            const header = allocation.getHeader().*;
+            const header = allocation.getHeader();
+            header.deallocated_by = ret_addr;
 
             if (maybe_check_info) |check_info| {
                 allocation.checkHeaderConsistency(data[0..check_info.length], check_info.alignment);
@@ -531,24 +536,38 @@ pub fn NextFitAllocator(config: Config) type {
             if (header.prev == null) self.first_allocation_at = header.next;
         }
 
-        pub fn deallocateBytes(self: *Self, data: []u8, alignment: std.mem.Alignment) void {
-            self.deallocateBytesImpl(data.ptr, .{
+        pub fn deallocateBytes(self: *Self, data: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+            self.deallocateBytesImpl(data.ptr, ret_addr, .{
                 .length = data.len,
                 .alignment = alignment,
             });
         }
 
-        pub fn debug(self: Self) void {
+        pub fn debug(self: *Self) void {
             const log = std.log.scoped(.nfa_debug);
+            self.debugImpl(log, struct {
+                fn aufruf(ctx: anytype, comptime fmt: []const u8, args: anytype) void {
+                    ctx.debug(fmt, args);
+                }
+            }.aufruf);
+        }
 
-            log.debug("====   nfa_debug   ====", .{});
-            log.debug("  heap start      : {*}", .{self.heap.ptr});
-            log.debug("  heap end        : {*} (heap start + {d})", .{ self.heap.ptr + self.heap.len, self.heap.len });
-            log.debug("  first alloc at  : {*} (heap start + {?d})", .{
+        pub fn debugImpl(
+            self: *Self,
+            log_ctx: anytype,
+            comptime log_fn: anytype,
+        ) void {
+            std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
+            defer self.race_detector.store(false, .release);
+
+            log_fn(log_ctx, "====   nfa_debug   ====", .{});
+            log_fn(log_ctx, "  heap start      : {*}", .{self.heap.ptr});
+            log_fn(log_ctx, "  heap end        : {*} (heap start + {d})", .{ self.heap.ptr + self.heap.len, self.heap.len });
+            log_fn(log_ctx, "  first alloc at  : {*} (heap start + {?d})", .{
                 self.first_allocation_at,
                 if (self.first_allocation_at) |v| v - self.heap.ptr else null,
             });
-            log.debug("  ====   allocations   ====", .{});
+            log_fn(log_ctx, "  ====   allocations   ====", .{});
 
             var prev_allocation: ?Allocation = null;
             var iterator = self.iterate();
@@ -565,25 +584,25 @@ pub fn NextFitAllocator(config: Config) type {
 
                 const pointers = allocation.getPointers();
 
-                log.debug("    ... {d} skipped bytes ...", .{skipped_bytes});
-                log.debug("    ====   allocation #{:02}   ====", .{alloc_no});
-                log.debug("      ====   pointers   ====", .{});
-                log.debug("        header_start          : {*}", .{pointers.header_start});
-                log.debug("        header_end            : {*}", .{pointers.header_end});
-                log.debug("        anterior_canary_start : {*}", .{pointers.anterior_canary_start});
-                log.debug("        anterior_canary_end   : {*}", .{pointers.anterior_canary_end});
-                log.debug("        data_start            : {*}", .{pointers.data_start});
-                log.debug("        data_end              : {*}", .{pointers.data_end});
-                log.debug("        posterior_canary_start: {*}", .{pointers.posterior_canary_start});
-                log.debug("        posterior_canary_end  : {*}", .{pointers.posterior_canary_end});
-                log.debug("      ==== pointers end ====", .{});
-                log.debug("      start      : {*}", .{allocation.header_ptr});
-                log.debug("      true length: {d}", .{allocation.firstPtrAfter() - allocation.header_ptr});
-                log.debug("      length     : {d}", .{allocation.getHeader().length});
-                log.debug("      alignment  : {d}", .{allocation.getHeader().alignment.toByteUnits()});
-                log.debug("      prev       : {*}", .{allocation.getHeader().prev});
-                log.debug("      next       : {*}", .{allocation.getHeader().next});
-                log.debug("    ==== allocation #{:02} end ====", .{alloc_no});
+                log_fn(log_ctx, "    ... {d} skipped bytes ...", .{skipped_bytes});
+                log_fn(log_ctx, "    ====   allocation #{:02}   ====", .{alloc_no});
+                log_fn(log_ctx, "      ====   pointers   ====", .{});
+                log_fn(log_ctx, "        header_start          : {*}", .{pointers.header_start});
+                log_fn(log_ctx, "        header_end            : {*}", .{pointers.header_end});
+                log_fn(log_ctx, "        anterior_canary_start : {*}", .{pointers.anterior_canary_start});
+                log_fn(log_ctx, "        anterior_canary_end   : {*}", .{pointers.anterior_canary_end});
+                log_fn(log_ctx, "        data_start            : {*}", .{pointers.data_start});
+                log_fn(log_ctx, "        data_end              : {*}", .{pointers.data_end});
+                log_fn(log_ctx, "        posterior_canary_start: {*}", .{pointers.posterior_canary_start});
+                log_fn(log_ctx, "        posterior_canary_end  : {*}", .{pointers.posterior_canary_end});
+                log_fn(log_ctx, "      ==== pointers end ====", .{});
+                log_fn(log_ctx, "      start      : {*}", .{allocation.header_ptr});
+                log_fn(log_ctx, "      true length: {d}", .{allocation.firstPtrAfter() - allocation.header_ptr});
+                log_fn(log_ctx, "      length     : {d}", .{allocation.getHeader().length});
+                log_fn(log_ctx, "      alignment  : {d}", .{allocation.getHeader().alignment.toByteUnits()});
+                log_fn(log_ctx, "      prev       : {*}", .{allocation.getHeader().prev});
+                log_fn(log_ctx, "      next       : {*}", .{allocation.getHeader().next});
+                log_fn(log_ctx, "    ==== allocation #{:02} end ====", .{alloc_no});
 
                 if (prev_allocation) |prev| {
                     std.debug.assert(prev.getHeader().next == allocation.header_ptr);
@@ -591,14 +610,14 @@ pub fn NextFitAllocator(config: Config) type {
                 }
             }
 
-            log.debug("    ... {d} more bytes ...", .{
+            log_fn(log_ctx, "    ... {d} more bytes ...", .{
                 if (prev_allocation) |prev|
                     (self.heap.ptr + self.heap.len) - prev.firstPtrAfter()
                 else
                     self.heap.len,
             });
-            log.debug("  ==== allocations end ====", .{});
-            log.debug("==== nfa_debug end ====", .{});
+            log_fn(log_ctx, "  ==== allocations end ====", .{});
+            log_fn(log_ctx, "==== nfa_debug end ====", .{});
         }
 
         race_detector: std.atomic.Value(bool) = .init(false),
@@ -693,10 +712,62 @@ test "stress test of NextFitAllocator" {
 
     for (0..test_allocations.len / 2) |_| {
         const i = random.intRangeLessThan(usize, 0, test_allocations.len);
-        const l = random.intRangeLessThan(usize, 128, 255);
+        const l = random.intRangeLessThan(usize, 128, 256);
         // const l = 255;
 
         alloc.free(test_allocations[i]);
         test_allocations[i] = try alloc.alloc(u8, l);
+    }
+}
+
+test "better stress test" {
+    const heap = try std.testing.allocator.alloc(u8, 512 * 1024);
+    defer std.testing.allocator.free(heap);
+
+    const allocations = try std.testing.allocator.alloc(?[]u8, 1024);
+    defer std.testing.allocator.free(allocations);
+    @memset(allocations, null);
+
+    const NFA = NextFitAllocator(.{});
+    var nfa: NFA = .{
+        .heap = heap,
+    };
+
+    const alloc = nfa.allocator();
+
+    var xoshiro = std.Random.Xoshiro256.init(@intCast(std.testing.random_seed));
+    const random = xoshiro.random();
+
+    for (0..16) |_| {
+        var num_alloc_loops: usize = 0;
+        while (true) : (num_alloc_loops += 1) {
+            const i = random.intRangeLessThan(usize, 0, allocations.len);
+            const l = random.intRangeAtMost(usize, 512 - 128, 512 + 128);
+
+            const new_allocation = alloc.alloc(u8, l) catch break;
+
+            if (allocations[i]) |allocation| {
+                alloc.free(allocation);
+                allocations[i] = null;
+            }
+
+            allocations[i] = new_allocation;
+        }
+
+        try std.testing.expect(num_alloc_loops > 32); // sanity check
+
+        var num_dealloc_loops: usize = 0;
+        for (0..allocations.len / 2) |_| {
+            num_dealloc_loops += 1;
+
+            const i = random.intRangeLessThan(usize, 0, allocations.len);
+
+            if (allocations[i]) |allocation| {
+                alloc.free(allocation);
+                allocations[i] = null;
+            }
+        }
+
+        try std.testing.expect(num_dealloc_loops > 32); // sanity check
     }
 }

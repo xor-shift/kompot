@@ -5,7 +5,6 @@ pub const RotatingArena = rotating_arena.RotatingArena;
 pub const RotatingArenaConfig = rotating_arena.RotatingArenaConfig;
 
 pub const NextFitAllocator = next_fit.NextFitAllocator;
-pub const NextFitAllocatorConfig = next_fit.Config;
 
 test {
     const std = @import("std");
