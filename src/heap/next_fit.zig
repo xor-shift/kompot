@@ -155,6 +155,14 @@ pub fn NextFitAllocator(config: Config) type {
 
                 posterior_canary_start: [*]u8,
                 posterior_canary_end: [*]u8,
+
+                pub fn start(self: Pointers) [*]u8 {
+                    return self.header_start;
+                }
+
+                pub fn end(self: Pointers) [*]u8 {
+                    return self.posterior_canary_end;
+                }
             };
 
             header_ptr: [*]align(@alignOf(Header)) u8,
@@ -452,6 +460,8 @@ pub fn NextFitAllocator(config: Config) type {
             alignment: std.mem.Alignment,
             ret_addr: usize,
         ) ?[*]u8 {
+            defer self.check();
+
             std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
             defer self.race_detector.store(false, .release);
 
@@ -505,6 +515,8 @@ pub fn NextFitAllocator(config: Config) type {
             length: usize,
             alignment: std.mem.Alignment,
         }) void {
+            defer self.check();
+
             std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
             defer self.race_detector.store(false, .release);
 
@@ -541,6 +553,39 @@ pub fn NextFitAllocator(config: Config) type {
                 .length = data.len,
                 .alignment = alignment,
             });
+        }
+
+        pub fn check(self: *Self) void {
+            std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
+            defer self.race_detector.store(false, .release);
+
+            var iterator = self.iterate();
+            var maybe_prev: ?Allocation = null;
+            while (iterator.next()) |curr| {
+                defer maybe_prev = curr;
+
+                curr.checkMarks();
+                curr.checkCanaries();
+
+                if (maybe_prev) |prev| {
+                    const curr_header_ptr = curr.getHeader();
+                    const curr_pointers = curr.getPointers();
+                    const prev_header_ptr = prev.getHeader();
+                    const prev_pointers = prev.getPointers();
+
+                    if (curr_header_ptr.prev) |curr_prev| {
+                        if (curr_prev != prev_pointers.start()) {
+                            @panic("curr.prev != prev");
+                        }
+                    } else @panic("curr must have a prev");
+
+                    if (prev_header_ptr.next) |prev_next| {
+                        if (prev_next != curr_pointers.start()) {
+                            @panic("prev.next != curr");
+                        }
+                    } else @panic("prev must have a next");
+                }
+            }
         }
 
         pub fn debug(self: *Self) void {
