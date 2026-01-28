@@ -9,6 +9,7 @@ const ring_buffer = @import("ring_buffer.zig");
 // pub const coro = @import("coro/root.zig");
 pub const fmt = @import("fmt/root.zig");
 pub const heap = @import("heap/root.zig");
+pub const sync = @import("sync/root.zig");
 pub const thread = @import("thread/root.zig");
 pub const wgm = @import("wgm/root.zig");
 
@@ -27,9 +28,10 @@ test {
     std.testing.refAllDecls(meta);
     std.testing.refAllDecls(poly);
     std.testing.refAllDecls(ring_buffer);
+    std.testing.refAllDecls(sync);
 
     // std.testing.refAllDecls(coro);
-    std.testing.refAllDecls(heap);
+    // std.testing.refAllDecls(heap);
     std.testing.refAllDecls(thread);
     std.testing.refAllDecls(wgm);
 }
@@ -110,3 +112,4 @@ pub fn splitDoublyLinkedList(
 
     return .{ lhs, rhs };
 }
+

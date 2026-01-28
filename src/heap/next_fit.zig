@@ -481,10 +481,11 @@ pub fn NextFitAllocator(config: Config) type {
                 return @ptrFromInt(ptr);
             }
 
-            defer self.check();
-
             std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
             defer self.race_detector.store(false, .release);
+
+            self.checkImpl();
+            defer self.checkImpl();
 
             const fit_result = self.findFit(length, alignment) orelse return null;
 
@@ -527,11 +528,11 @@ pub fn NextFitAllocator(config: Config) type {
 
             // if (true) return;
 
-            defer self.check();
-            self.check();
-
             std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
             defer self.race_detector.store(false, .release);
+
+            defer self.checkImpl();
+            self.checkImpl();
 
             const allocation = Allocation.fromDataPtr(data);
             const header = allocation.getHeader();
@@ -593,21 +594,18 @@ pub fn NextFitAllocator(config: Config) type {
             unreachable;
         }
 
-        /// Checks all of the allocations for consistency
-        pub fn check(self: *Self) void {
-            std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
-            defer self.race_detector.store(false, .release);
-
+        /// externally synchronized
+        fn checkImpl(self: *Self) void {
             var iterator = self.iterate();
             var maybe_prev: ?Allocation = null;
             while (iterator.next()) |curr| {
                 defer maybe_prev = curr;
 
-                curr.checkMarks();
-                curr.checkCanaries();
-
                 const curr_header_ptr = curr.getHeader();
                 const curr_pointers = curr.getPointers();
+
+                curr.checkMarks();
+                curr.checkCanaries();
 
                 if (curr_header_ptr.deallocated_by != 0) {
                     @panic("freed allocation still in the list");
@@ -630,6 +628,14 @@ pub fn NextFitAllocator(config: Config) type {
                     } else @panic("prev must have a next");
                 }
             }
+        }
+
+        /// Checks all of the allocations for consistency
+        pub fn check(self: *Self) void {
+            std.debug.assert(self.race_detector.cmpxchgStrong(false, true, .acq_rel, .acquire) == null);
+            defer self.race_detector.store(false, .release);
+
+            self.checkImpl();
         }
 
         pub fn debug(self: *Self) void {

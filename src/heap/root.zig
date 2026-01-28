@@ -6,9 +6,12 @@ pub const RotatingArenaConfig = rotating_arena.RotatingArenaConfig;
 
 pub const NextFitAllocator = next_fit.NextFitAllocator;
 
+pub const AtomicBumpAllocator = @import("AtomicBumpAllocator.zig");
+
 test {
     const std = @import("std");
 
     std.testing.refAllDecls(next_fit);
     std.testing.refAllDecls(rotating_arena);
+    std.testing.refAllDecls(AtomicBumpAllocator);
 }
