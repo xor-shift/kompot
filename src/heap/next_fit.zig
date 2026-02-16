@@ -907,3 +907,553 @@ test "NextFitAllocator thru allocator_tester" {
         }.aufruf,
     );
 }
+
+/// Use this allocator only if you've got nothing else. It's terrible and a
+/// substitute for nothing.
+const Asd = struct {
+    const Self = @This();
+
+    const VTable = struct {
+        fn alloc(
+            self_opaque: *anyopaque,
+            length: usize,
+            alignment: std.mem.Alignment,
+            ret_addr: usize,
+        ) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(self_opaque));
+
+            return self.allocateBytes(length, alignment, ret_addr);
+        }
+
+        fn free(
+            self_opaque: *anyopaque,
+            memory: []u8,
+            alignment: std.mem.Alignment,
+            ret_addr: usize,
+        ) void {
+            const self: *Self = @ptrCast(@alignCast(self_opaque));
+            return self.deallocateBytes(memory, alignment, ret_addr);
+        }
+    };
+
+    pub fn init(heap: []u8) Self {
+        return .{
+            .heap = heap,
+        };
+    }
+
+    pub fn allocator(self: *Self) std.mem.Allocator {
+        return .{
+            .ptr = @ptrCast(self),
+            .vtable = &std.mem.Allocator.VTable{
+                .alloc = &VTable.alloc,
+                .resize = std.mem.Allocator.noResize,
+                .remap = std.mem.Allocator.noRemap,
+                .free = &VTable.free,
+            },
+        };
+    }
+
+    const Allocation = struct {
+        const Header = struct {
+            length: usize,
+            alignment: std.mem.Alignment,
+
+            prev: ?[*]u8 = null,
+            next: ?[*]u8 = null,
+        };
+
+        /// *_end pointers are one-past-the-end pointers
+        const Pointers = struct {
+            header_start: [*]u8,
+            header_end: [*]u8,
+
+            data_start: [*]u8,
+            data_end: [*]u8,
+
+            pub fn start(self: Pointers) [*]u8 {
+                return self.header_start;
+            }
+
+            pub fn headerBytes(self: Pointers) []u8 {
+                return self.header_start[0 .. self.header_end - self.header_start];
+            }
+
+            pub fn dataBytes(self: Pointers) []u8 {
+                return self.data_start[0 .. self.data_end - self.data_start];
+            }
+
+            pub fn end(self: Pointers) [*]u8 {
+                return self.data_end;
+            }
+        };
+
+        header_ptr: [*]u8,
+
+        fn fromDataPtr(data_ptr: [*]u8) Allocation {
+            const aligned_usize = @intFromPtr(data_ptr) - @sizeOf(Header);
+
+            return .{
+                .header_ptr = @ptrFromInt(aligned_usize),
+            };
+        }
+
+        fn removeThisFromTheMiddle(self: Allocation) void {
+            const header = self.getHeader();
+
+            if (header.prev) |prev| {
+                const prev_alloc = Allocation{ .header_ptr = prev };
+                const prev_header = prev_alloc.getHeader();
+
+                prev_header.next = header.next;
+            }
+
+            if (header.next) |next| {
+                const next_alloc = Allocation{ .header_ptr = next };
+                const next_header = next_alloc.getHeader();
+
+                next_header.prev = header.prev;
+            }
+        }
+
+        fn insertThisIntoTheMiddle(
+            self: Allocation,
+            maybe_prev: ?Allocation,
+            maybe_next: ?Allocation,
+        ) void {
+            if (maybe_prev) |prev_alloc| {
+                const prev_header = prev_alloc.getHeader();
+                prev_header.next = self.header_ptr;
+            }
+
+            if (maybe_next) |next_alloc| {
+                const next_header = next_alloc.getHeader();
+                next_header.prev = self.header_ptr;
+            }
+        }
+
+        fn getPointersGivenHeader(self: Allocation, header: Header) Pointers {
+            const header_start = self.header_ptr;
+            const header_end = header_start + @sizeOf(Header);
+
+            const data_start = header_end;
+            const data_end = data_start + header.length;
+
+            return .{
+                .header_start = header_start,
+                .header_end = header_end,
+
+                .data_start = data_start,
+                .data_end = data_end,
+            };
+        }
+
+        fn getHeader(self: Allocation) *align(1) Header {
+            const actual_ptr: *align(1) Header = @ptrCast(self.header_ptr);
+            return actual_ptr;
+        }
+
+        fn getPointers(self: Allocation) Pointers {
+            return self.getPointersGivenHeader(self.getHeader().*);
+        }
+
+        fn getData(self: Allocation) []u8 {
+            const pointers = self.getPointersGivenHeader(self.getHeader().*);
+            return pointers.data_start[0..self.getHeader().length];
+        }
+
+        fn firstPtrAfter(self: Allocation) [*]u8 {
+            return self.getPointersGivenHeader(self.getHeader().*).end();
+        }
+
+        fn firstPtrAfterGivenHeader(self: Allocation, header: Header) [*]u8 {
+            const pointers = self.getPointersGivenHeader(header);
+            return pointers.posterior_canary_end;
+        }
+    };
+
+    const Iterator = struct {
+        curr: ?[*]u8 = null,
+
+        pub fn next(self: *Iterator) ?Allocation {
+            const curr: Allocation = .{
+                .header_ptr = self.curr orelse return null,
+            };
+            self.curr = curr.getHeader().next;
+
+            return curr;
+        }
+    };
+
+    fn iterate(self: Self) Iterator {
+        return .{
+            .curr = self.first_allocation_at,
+        };
+    }
+
+    pub const Statistics = struct {
+        num_active_allocations: usize,
+        num_free_regions: usize,
+        largest_free_region: usize,
+
+        bytes_data: usize,
+        bytes_total: usize,
+        bytes_free_upto_last_alloc: usize,
+        bytes_free_after_last_alloc: usize,
+    };
+
+    pub fn stats(self: *Self) Statistics {
+        var ret = std.mem.zeroes(Statistics);
+
+        var iter = self.iterate();
+        var maybe_prev_allocation: ?Allocation = null;
+        while (iter.next()) |allocation| {
+            defer maybe_prev_allocation = allocation;
+
+            const ptrs = allocation.getPointers();
+
+            if (maybe_prev_allocation) |prev_allocation| {
+                const free_bytes_before = allocation.header_ptr - prev_allocation.firstPtrAfter();
+
+                ret.num_free_regions += 1;
+                ret.bytes_free_upto_last_alloc += free_bytes_before;
+                ret.largest_free_region = @max(ret.largest_free_region, free_bytes_before);
+            } else if (allocation.header_ptr != self.heap.ptr) {
+                const free_bytes_before = allocation.header_ptr - self.heap.ptr;
+
+                ret.num_free_regions += 1;
+                ret.bytes_free_upto_last_alloc += free_bytes_before;
+                ret.largest_free_region = @max(ret.largest_free_region, free_bytes_before);
+            }
+
+            ret.num_active_allocations += 1;
+
+            ret.bytes_data += ptrs.data_end - ptrs.data_start;
+            ret.bytes_total += ptrs.posterior_canary_end - ptrs.header_start;
+        }
+
+        ret.bytes_free_after_last_alloc = if (maybe_prev_allocation) |last_allocation|
+            self.heap.ptr + self.heap.len - last_allocation.firstPtrAfter()
+        else
+            self.heap.len;
+
+        return ret;
+    }
+
+    fn findFit(self: Self, length: usize, alignment: std.mem.Alignment) ?struct {
+        raw_allocation: Allocation,
+        prev: ?Allocation,
+        next: ?Allocation,
+    } {
+        var iterator = self.iterate();
+
+        const tryFit = struct {
+            fn aufruf(
+                empty_space_start: [*]u8,
+                empty_space_end: [*]u8,
+                length_: usize,
+                alignment_: std.mem.Alignment,
+            ) ?Allocation {
+                const space_before_data = @sizeOf(Allocation.Header) + @sizeOf(Canary);
+                const space_after_data = @sizeOf(Canary);
+                _ = space_after_data;
+
+                const aligned_space_for_data_and_posterior_canary: []u8 = util.spaceAfterAlignment(
+                    empty_space_start + space_before_data,
+                    empty_space_end,
+                    alignment_.toByteUnits(),
+                ) orelse return null;
+
+                const allocation: Allocation = .{
+                    .header_ptr = aligned_space_for_data_and_posterior_canary.ptr - space_before_data,
+                };
+
+                const pointers = allocation.getPointersGivenHeader(.{
+                    .length = length_,
+                    .alignment = alignment_,
+                });
+
+                const overflown = @intFromPtr(pointers.end()) > @intFromPtr(empty_space_end);
+
+                if (overflown) return null;
+
+                return allocation;
+            }
+        }.aufruf;
+
+        var prev = iterator.next() orelse {
+            const allocation = tryFit(
+                self.heap.ptr,
+                self.heap.ptr + self.heap.len,
+                length,
+                alignment,
+            ) orelse return null;
+
+            return .{
+                .raw_allocation = allocation,
+                .prev = null,
+                .next = null,
+            };
+        };
+
+        while (iterator.next()) |curr| {
+            defer prev = curr;
+
+            const allocation = tryFit(
+                prev.firstPtrAfter(),
+                curr.header_ptr,
+                length,
+                alignment,
+            ) orelse continue;
+
+            // std.log.debug("asdf", .{});
+
+            return .{
+                .raw_allocation = allocation,
+                .prev = prev,
+                .next = curr,
+            };
+        }
+
+        const allocation = tryFit(
+            prev.firstPtrAfter(),
+            self.heap.ptr + self.heap.len,
+            length,
+            alignment,
+        ) orelse return null;
+
+        return .{
+            .raw_allocation = allocation,
+            .prev = prev,
+            .next = null,
+        };
+    }
+
+    pub fn allocateBytes(
+        self: *Self,
+        length: usize,
+        alignment: std.mem.Alignment,
+        ret_addr: usize,
+    ) ?[*]u8 {
+        _ = ret_addr;
+
+        if (length == 0) {
+            const ptr = std.mem.alignBackward(usize, std.math.maxInt(usize), alignment.toByteUnits());
+            return @ptrFromInt(ptr);
+        }
+
+        const fit_result = self.findFit(length, alignment) orelse return null;
+
+        const allocation = fit_result.raw_allocation;
+
+        if (fit_result.prev) |prev| {
+            if (fit_result.next) |next| {
+                std.debug.assert(prev.getHeader().next == next.header_ptr);
+                std.debug.assert(next.getHeader().prev == prev.header_ptr);
+            }
+        }
+
+        allocation.insertThisIntoTheMiddle(fit_result.prev, fit_result.next);
+
+        allocation.getHeader().* = .{
+            .length = length,
+            .alignment = alignment,
+
+            .prev = if (fit_result.prev) |v| v.header_ptr else null,
+            .next = if (fit_result.next) |v| v.header_ptr else null,
+        };
+
+        if (fit_result.prev == null and fit_result.next == null) {
+            std.debug.assert(self.first_allocation_at == null);
+            self.first_allocation_at = allocation.header_ptr;
+        }
+
+        return allocation.getData().ptr;
+    }
+
+    pub fn deallocateBytesImpl(self: *Self, data: [*]u8, ret_addr: usize, maybe_check_info: ?struct {
+        length: usize,
+        alignment: std.mem.Alignment,
+    }) void {
+        _ = ret_addr;
+
+        if (maybe_check_info) |info| {
+            if (info.length == 0) return;
+        }
+
+        // if (true) return;
+
+        const allocation = Allocation.fromDataPtr(data);
+        const header = allocation.getHeader();
+
+        allocation.removeThisFromTheMiddle();
+        @memset(allocation.getData(), 0);
+
+        if (header.prev == null) self.first_allocation_at = header.next;
+    }
+
+    pub fn deallocateBytes(self: *Self, data: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        self.deallocateBytesImpl(data.ptr, ret_addr, .{
+            .length = data.len,
+            .alignment = alignment,
+        });
+    }
+
+    /// Checks whether an allocation belongs to this NFA
+    pub fn assertAllocationIsValid(self: *Self, data_ptr: [*]u8) Allocation {
+        var iterator = self.iterate();
+        while (iterator.next()) |curr| {
+            const curr_data_ptr = curr.getData().ptr;
+            if (curr_data_ptr == data_ptr) return curr;
+
+            const curr_data_uintptr = @intFromPtr(curr_data_ptr);
+            const data_uintptr = @intFromPtr(data_ptr);
+            if (curr_data_uintptr > data_uintptr) @panic("this allocation does not belong here");
+        }
+
+        unreachable;
+    }
+
+    /// externally synchronized
+    fn checkImpl(self: *Self) void {
+        var iterator = self.iterate();
+        var maybe_prev: ?Allocation = null;
+        while (iterator.next()) |curr| {
+            defer maybe_prev = curr;
+
+            const curr_header_ptr = curr.getHeader();
+            const curr_pointers = curr.getPointers();
+
+            curr.checkMarks();
+            curr.checkCanaries();
+
+            if (curr_header_ptr.deallocated_by != 0) {
+                @panic("freed allocation still in the list");
+            }
+
+            if (maybe_prev) |prev| {
+                const prev_header_ptr = prev.getHeader();
+                const prev_pointers = prev.getPointers();
+
+                if (curr_header_ptr.prev) |curr_prev| {
+                    if (curr_prev != prev_pointers.start()) {
+                        @panic("curr.prev != prev");
+                    }
+                } else @panic("curr must have a prev");
+
+                if (prev_header_ptr.next) |prev_next| {
+                    if (prev_next != curr_pointers.start()) {
+                        @panic("prev.next != curr");
+                    }
+                } else @panic("prev must have a next");
+            }
+        }
+    }
+
+    pub fn debug(self: *Self) void {
+        const log = std.log.scoped(.nfa_debug);
+        self.debugImpl(log, struct {
+            fn aufruf(ctx: anytype, comptime fmt: []const u8, args: anytype) void {
+                ctx.debug(fmt, args);
+            }
+        }.aufruf);
+    }
+
+    pub fn debugImpl(
+        self: *Self,
+        log_ctx: anytype,
+        comptime log_fn: anytype,
+    ) void {
+        log_fn(log_ctx, "====   nfa_debug   ====", .{});
+        log_fn(log_ctx, "  heap start      : {*}", .{self.heap.ptr});
+        log_fn(log_ctx, "  heap end        : {*} (heap start + {d})", .{ self.heap.ptr + self.heap.len, self.heap.len });
+        log_fn(log_ctx, "  first alloc at  : {*} (heap start + {?d})", .{
+            self.first_allocation_at,
+            if (self.first_allocation_at) |v| v - self.heap.ptr else null,
+        });
+        log_fn(log_ctx, "  ====   allocations   ====", .{});
+
+        var prev_allocation: ?Allocation = null;
+        var iterator = self.iterate();
+
+        var alloc_no: usize = 0;
+        while (iterator.next()) |allocation| {
+            defer prev_allocation = allocation;
+            defer alloc_no += 1;
+
+            const skipped_bytes = if (prev_allocation) |prev|
+                allocation.header_ptr - prev.firstPtrAfter()
+            else
+                allocation.header_ptr - self.heap.ptr;
+
+            const pointers = allocation.getPointers();
+
+            log_fn(log_ctx, "    ... {d} skipped bytes ...", .{skipped_bytes});
+            log_fn(log_ctx, "    ====   allocation #{:02}   ====", .{alloc_no});
+            log_fn(log_ctx, "      ====   pointers   ====", .{});
+            log_fn(log_ctx, "        header_start          : {*}", .{pointers.header_start});
+            log_fn(log_ctx, "        header_end            : {*}", .{pointers.header_end});
+            log_fn(log_ctx, "        data_start            : {*}", .{pointers.data_start});
+            log_fn(log_ctx, "        data_end              : {*}", .{pointers.data_end});
+            log_fn(log_ctx, "      ==== pointers end ====", .{});
+            log_fn(log_ctx, "      start      : {*}", .{allocation.header_ptr});
+            log_fn(log_ctx, "      true length: {d}", .{allocation.firstPtrAfter() - allocation.header_ptr});
+            log_fn(log_ctx, "      length     : {d}", .{allocation.getHeader().length});
+            log_fn(log_ctx, "      alignment  : {d}", .{allocation.getHeader().alignment.toByteUnits()});
+            log_fn(log_ctx, "      prev       : {*}", .{allocation.getHeader().prev});
+            log_fn(log_ctx, "      next       : {*}", .{allocation.getHeader().next});
+            log_fn(log_ctx, "    ==== allocation #{:02} end ====", .{alloc_no});
+
+            if (prev_allocation) |prev| {
+                std.debug.assert(prev.getHeader().next == allocation.header_ptr);
+                std.debug.assert(prev.header_ptr == allocation.getHeader().prev);
+            }
+        }
+
+        log_fn(log_ctx, "    ... {d} more bytes ...", .{
+            if (prev_allocation) |prev|
+                (self.heap.ptr + self.heap.len) - prev.firstPtrAfter()
+            else
+                self.heap.len,
+        });
+        log_fn(log_ctx, "  ==== allocations end ====", .{});
+        log_fn(log_ctx, "==== nfa_debug end ====", .{});
+    }
+
+    pub fn isEmpty(self: *Self) bool {
+        return self.first_allocation_at == null;
+    }
+
+    heap: []u8,
+    first_allocation_at: ?[*]u8 = null,
+};
+
+test "Asd thru allocator_tester" {
+    const heap = try std.testing.allocator.alloc(u8, 16 * 1024 * 1024);
+    defer std.testing.allocator.free(heap);
+
+    const NFA = Asd;
+    var nfa: NFA = .{
+        .heap = heap,
+    };
+
+    const alloc = nfa.allocator();
+
+    const tester = @import("allocator_tester.zig");
+    try tester.testAllocator(
+        std.testing.allocator,
+        alloc,
+        struct {
+            fn aufruf(alloc_: std.mem.Allocator) bool {
+                const alloc_ptr: *NFA = @ptrCast(@alignCast(alloc_.ptr));
+                return alloc_ptr.isEmpty();
+            }
+        }.aufruf,
+        struct {
+            fn aufruf(alloc_: std.mem.Allocator) void {
+                const alloc_ptr: *NFA = @ptrCast(@alignCast(alloc_.ptr));
+                alloc_ptr.debug();
+            }
+        }.aufruf,
+    );
+}

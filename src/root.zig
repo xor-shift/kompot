@@ -31,7 +31,7 @@ test {
     std.testing.refAllDecls(sync);
 
     // std.testing.refAllDecls(coro);
-    // std.testing.refAllDecls(heap);
+    std.testing.refAllDecls(heap);
     std.testing.refAllDecls(thread);
     std.testing.refAllDecls(wgm);
 }
@@ -113,3 +113,83 @@ pub fn splitDoublyLinkedList(
     return .{ lhs, rhs };
 }
 
+pub const UnalignedDoublyLinkedList = struct {
+    pub const Node = struct {
+        prev: ?*align(1) Node = null,
+        next: ?*align(1) Node = null,
+    };
+
+    const Self = @This();
+
+    // invariant: (first == null) == (last == null)
+    // it is inconvenient to represent this with an enum
+
+    first: ?*align(1) Node = null,
+    last: ?*align(1) Node = null,
+
+    pub fn appendAfter(self: *Self, after: *align(1) Node, node: *align(1) Node) void {
+        std.debug.assert(self.first != null);
+        std.debug.assert(self.last != null);
+
+        // A <-> B
+        // into
+        // A <-> N <-> B
+        const a = after;
+
+        if (a.next) |b| {
+            a.next = node;
+            b.prev = node;
+
+            node.* = .{
+                .prev = a,
+                .next = b,
+            };
+
+            return;
+        }
+
+        std.debug.assert(self.last.? == a);
+
+        a.next = node;
+        self.last = node;
+
+        node.* = .{
+            .prev = a,
+            .next = null,
+        };
+    }
+
+    pub fn append(self: *Self, node: *align(1) Node) void {
+        node.* = .{};
+
+        if (self.last) |last| {
+            return self.appendAfter(last, node);
+        }
+
+        std.debug.assert(self.first == null);
+
+        self.first = node;
+        self.last = node;
+    }
+
+    pub fn remove(self: *Self, node: *align(1) Node) void {
+        if (node.prev) |a| {
+            a.next = node.next;
+        } else {
+            self.first = node.next;
+        }
+
+        if (node.next) |b| {
+            b.prev = node.prev;
+        } else {
+            self.last = node.prev;
+        }
+
+        std.debug.assert((self.first == null) == (self.last == null));
+    }
+
+    pub fn isEmpty(self: *Self) bool {
+        std.debug.assert((self.first == null) == (self.last == null));
+        return self.first == null;
+    }
+};
