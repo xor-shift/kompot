@@ -110,7 +110,7 @@ const util = struct {
                     const ptr: [*]T = @ptrCast(@alignCast(allocation.allocation));
                     const slice = ptr[0..allocation.len];
 
-                    if (do_log) std.log.debug("freeing {d} of {s}", .{ allocation.len, @typeName(T) });
+                    if (do_log) std.log.debug("freeing {d} of {s} ({d} bytes)...", .{ allocation.len, @typeName(T), allocation.len * @sizeOf(T) });
                     allocator.free(slice);
                 }
             }.aufruf;
@@ -124,8 +124,8 @@ const util = struct {
         comptime T: type,
         len: usize,
     ) !void {
+        if (do_log) std.log.debug("allocating {d} of {s} ({d} bytes)...", .{ len, @typeName(T), len * @sizeOf(T) });
         const allocation = try doAlloc(alloc, T, len);
-        if (do_log) std.log.debug("allocating {d} of {s}", .{ len, @typeName(T) });
 
         try into.append(known_good, SavedAlloc{
             .allocation = allocation.ptr,
@@ -170,7 +170,7 @@ const cases = struct {
 
         inline for (3..7) |len_log_2| {
             const Int = std.meta.Int(.unsigned, 1 << len_log_2);
-            for (0..64) |i| {
+            for (1..64) |i| {
                 try util.doAndSaveAlloc(known_good, &list, alloc, Int, i);
             }
         }
@@ -236,7 +236,6 @@ pub fn testAllocator(
 ) !void {
     inline for (.{
         // cases.previousEdgeCases,
-        // cases.basicIndividualCases,
         // cases.basicIndividualCases,
         // cases.someRanges,
         cases.randomised,

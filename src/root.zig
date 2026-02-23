@@ -193,3 +193,67 @@ pub const UnalignedDoublyLinkedList = struct {
         return self.first == null;
     }
 };
+
+pub const deleter = struct {
+    pub fn Pointer(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            const ValueType = *T;
+
+            alloc: std.mem.Allocator,
+
+            pub fn init(alloc: std.mem.Allocator) Self {
+                return .{
+                    .alloc = alloc,
+                };
+            }
+
+            pub fn delete(self: Self, ptr: *ValueType) void {
+                self.alloc.destroy(ptr.*);
+            }
+        };
+    }
+
+    pub fn Slice(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            const ValueType = []T;
+
+            alloc: std.mem.Allocator,
+
+            pub fn init(alloc: std.mem.Allocator) Self {
+                return .{
+                    .alloc = alloc,
+                };
+            }
+
+            // ptr must be `*[]const T` or `*[] T`
+            pub fn delete(self: Self, ptr: anytype) void {
+                self.alloc.free(ptr.*);
+            }
+        };
+    }
+
+    pub fn Trivial(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            const ValueType = T;
+
+            alloc: std.mem.Allocator,
+
+            pub fn init(alloc: std.mem.Allocator) Self {
+                return .{
+                    .alloc = alloc,
+                };
+            }
+
+            pub fn delete(self: Self, ptr: *ValueType) void {
+                _ = self;
+                _ = ptr;
+            }
+        };
+    }
+};
