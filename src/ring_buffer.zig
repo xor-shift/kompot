@@ -11,6 +11,12 @@ pub fn RingBuffer(comptime T: type) type {
         read_head: usize = 0,
         write_head: usize = 0,
 
+        pub fn init(storage: []T) Self {
+            return .{
+                .storage = storage,
+            };
+        }
+
         pub fn usedCapacity(self: Self) usize {
             return self.write_head - self.read_head;
         }
@@ -140,17 +146,17 @@ test RingBuffer {
     ring_buffer.writeAll(&.{ 1, 2, 3 });
     try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, ring_buffer.readableSlice(0));
     try std.testing.expectEqualSlices(u8, &.{ 2, 3 }, ring_buffer.readableSlice(1));
-    try std.testing.expectEqualSlices(u8, &.{ 3 }, ring_buffer.readableSlice(2));
-    try std.testing.expectEqualSlices(u8, &.{ }, ring_buffer.readableSlice(3));
+    try std.testing.expectEqualSlices(u8, &.{3}, ring_buffer.readableSlice(2));
+    try std.testing.expectEqualSlices(u8, &.{}, ring_buffer.readableSlice(3));
     ring_buffer.discard(3);
 
     ring_buffer.writeAll(&.{ 4, 5, 6, 7, 8 });
     try std.testing.expectEqualSlices(u8, &.{ 4, 5 }, ring_buffer.readableSlice(0));
-    try std.testing.expectEqualSlices(u8, &.{ 5 }, ring_buffer.readableSlice(1));
+    try std.testing.expectEqualSlices(u8, &.{5}, ring_buffer.readableSlice(1));
     try std.testing.expectEqualSlices(u8, &.{ 6, 7, 8 }, ring_buffer.readableSlice(2));
     try std.testing.expectEqualSlices(u8, &.{ 7, 8 }, ring_buffer.readableSlice(3));
-    try std.testing.expectEqualSlices(u8, &.{ 8 }, ring_buffer.readableSlice(4));
-    try std.testing.expectEqualSlices(u8, &.{ }, ring_buffer.readableSlice(5));
+    try std.testing.expectEqualSlices(u8, &.{8}, ring_buffer.readableSlice(4));
+    try std.testing.expectEqualSlices(u8, &.{}, ring_buffer.readableSlice(5));
     ring_buffer.discard(2);
     try std.testing.expectEqualSlices(u8, &.{ 6, 7, 8 }, ring_buffer.readableSlice(0));
 }

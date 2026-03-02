@@ -1,16 +1,18 @@
+const ring_buffer = @import("ring_buffer.zig");
+
 pub const algorithm = @import("algorithm.zig");
 pub const bit = @import("bit.zig");
 pub const cobs = @import("cobs.zig");
 pub const curves = @import("curves.zig");
 pub const meta = @import("meta.zig");
 pub const poly = @import("poly.zig");
-const ring_buffer = @import("ring_buffer.zig");
 
-// pub const coro = @import("coro/root.zig");
 pub const fmt = @import("fmt/root.zig");
 pub const heap = @import("heap/root.zig");
+pub const log = @import("log/root.zig");
+pub const net = @import("net/root.zig");
+pub const os2 = @import("os2/root.zig");
 pub const sync = @import("sync/root.zig");
-pub const thread = @import("thread/root.zig");
 pub const wgm = @import("wgm/root.zig");
 
 pub const RingBuffer = ring_buffer.RingBuffer;
@@ -24,15 +26,16 @@ test {
     std.testing.refAllDecls(bit);
     std.testing.refAllDecls(cobs);
     std.testing.refAllDecls(curves);
-    std.testing.refAllDecls(fmt);
     std.testing.refAllDecls(meta);
     std.testing.refAllDecls(poly);
     std.testing.refAllDecls(ring_buffer);
-    std.testing.refAllDecls(sync);
 
-    // std.testing.refAllDecls(coro);
+    std.testing.refAllDecls(fmt);
     std.testing.refAllDecls(heap);
-    std.testing.refAllDecls(thread);
+    std.testing.refAllDecls(log);
+    std.testing.refAllDecls(net);
+    std.testing.refAllDecls(os2);
+    std.testing.refAllDecls(sync);
     std.testing.refAllDecls(wgm);
 }
 

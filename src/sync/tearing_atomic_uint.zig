@@ -81,26 +81,27 @@ pub fn TearingAtomicUint(comptime bits: usize) type {
             comptime strong: bool,
             v: Int,
             maybe_expected_generation: ?usize,
-        ) bool {
+        ) ?Int {
             const to_store = Self.dataFromInt(v);
 
             const meta_0: Meta = .load(&self.meta);
 
             if (meta_0.is_being_edited) {
-                return false;
+                return null;
             }
 
             if (maybe_expected_generation) |expected_generation| {
-                if (meta_0.generation != expected_generation) return false;
+                if (meta_0.generation != expected_generation) return null;
             }
 
             if (Meta.cmpxchg(strong, &self.meta, meta_0, .{
                 .is_being_edited = true,
                 .generation = meta_0.generation,
             }) != null) {
-                return false;
+                return null;
             }
 
+            const old_value = Self.intFromData(self.data);
             for (to_store, 0..) |atomic_to_store, i| {
                 @atomicStore(Atomic, &self.data[i], atomic_to_store, .release);
             }
@@ -111,7 +112,7 @@ pub fn TearingAtomicUint(comptime bits: usize) type {
             };
             new_meta.store(&self.meta);
 
-            return true;
+            return old_value;
         }
 
         const LoadRes = struct {
@@ -177,7 +178,7 @@ pub fn TearingAtomicUint(comptime bits: usize) type {
 
             const new_value = @call(.auto, op_fun, .{load_res.v} ++ args);
 
-            if (!self.tryStoreImpl(strong, new_value, load_res.generation)) return null;
+            if (self.tryStoreImpl(strong, new_value, load_res.generation) == null) return null;
 
             return load_res.v;
         }
@@ -197,6 +198,11 @@ pub fn TearingAtomicUint(comptime bits: usize) type {
 
             fn div(lhs: Int, rhs: Int) Int {
                 return lhs / rhs;
+            }
+
+            fn set(lhs: Int, rhs: Int) Int {
+                _ = lhs;
+                return rhs;
             }
         };
 
@@ -221,6 +227,19 @@ pub fn TearingAtomicUint(comptime bits: usize) type {
                     unreachable;
                 }
             }.aufruf;
+        }
+
+        pub fn tryStore(self: *Self, comptime strong: bool, v: Int) ?Int {
+            return self.tryStoreImpl(strong, v, null);
+        }
+
+        pub fn store(self: *Self, v: Int) Int {
+            while (true) {
+                if (self.tryStore(false, v)) |old_value| return old_value;
+                continue;
+            }
+
+            unreachable;
         }
 
         /// Adds `v` to the internal representation and returns the old value.

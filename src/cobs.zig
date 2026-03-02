@@ -127,13 +127,13 @@ test Reader {
         while (true) {
             const curr_read = cobs_reader.reader.stream(&decoded_writer, .unlimited) catch |e| switch (e) {
                 std.io.Reader.StreamError.EndOfStream => {
-                    std.log.debug("end of stream from cobs_reader", .{});
+                    // std.log.debug("end of stream from cobs_reader", .{});
                     break;
                 },
                 else => return e,
             };
 
-            std.log.debug("cobs_reader gave us {d} byte(s)", .{curr_read});
+            // std.log.debug("cobs_reader gave us {d} byte(s)", .{curr_read});
             total_read += curr_read;
 
             if (curr_read == 0) break;
