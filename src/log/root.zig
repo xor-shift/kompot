@@ -255,7 +255,7 @@ pub const NamedLogger = struct {
         self.logger.logRaw(.{
             .src = src,
 
-            .thread_id = 0,
+            .thread_id = @intCast(std.Thread.getCurrentId()),
             .process_id = 0,
 
             .time_point = self.logger.clock.now(),

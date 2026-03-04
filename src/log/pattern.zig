@@ -111,7 +111,13 @@ pub const default_patterns = struct {
         Element{ .flag = .{ .level = .{ .short = true } } },
         Element{ .flag = .{ .level = .{ .short = true } } },
         Element{ .flag = .{ .level = .{ .short = true } } },
-        Element{ .flag = .{ .literal_string = " [" } },
+        Element{ .flag = .{ .literal_string = " (" } },
+        Element{
+            .flag = .thread_id,
+            .alignment_kind = .right,
+            .alignment_width = "4294967295".len,
+        },
+        Element{ .flag = .{ .literal_string = ") [" } },
         Element{
             .flag = .{ .ns_from_startup = .{ .divisor = std.time.ns_per_ms } },
             .alignment_kind = .right,

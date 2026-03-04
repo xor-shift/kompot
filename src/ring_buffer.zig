@@ -134,21 +134,92 @@ pub fn RingBuffer(comptime T: type) type {
             std.debug.assert(self.remainingCapacity() >= num_elements);
             self.write_head += num_elements;
         }
+
+        pub const Reader = struct {
+            reader: std.io.Reader,
+            rb: *Self,
+
+            fn init(self: *Self, buffer: []u8) Reader {
+                return .{
+                    .reader = .{
+                        .buffer = buffer,
+                        .seek = 0,
+                        .end = 0,
+                        .vtable = &std.io.Reader.VTable{
+                            .stream = &Reader.vStream,
+                            .discard = &Reader.vDiscard,
+                        },
+                    },
+                    .rb = self,
+                };
+            }
+
+            /// this function is atomic: it will not consume bytes from the
+            /// ring buffer if the write operation returns errors.
+            fn vStream(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
+                const ctx: *Reader = @alignCast(@fieldParentPtr("reader", r));
+
+                var written_total: usize = 0;
+
+                while (true) {
+                    const remaining_limit = limit.subtract(written_total).?;
+                    if (remaining_limit == std.io.Limit.limited(0)) break;
+
+                    const slice = ctx.rb.readableSlice(written_total);
+                    if (slice.len == 0) return std.io.Reader.StreamError.EndOfStream;
+
+                    const num_to_consume: usize = remaining_limit.minInt(slice.len);
+
+                    const to_consume = slice[0..num_to_consume];
+                    const written_cur = try w.write(to_consume);
+                    written_total += written_cur;
+
+                    if (written_cur == 0) break;
+                }
+
+                ctx.rb.discard(written_total);
+                return written_total;
+            }
+
+            fn vDiscard(r: *std.io.Reader, limit: std.io.Limit) std.io.Reader.Error!usize {
+                const ctx: *Reader = @alignCast(@fieldParentPtr("reader", r));
+
+                const to_discard = limit.minInt(ctx.rb.usedCapacity());
+                ctx.rb.discard(to_discard);
+
+                return to_discard;
+            }
+        };
+
+        pub fn reader(self: *Self, buffer: []u8) Reader {
+            return Reader.init(self, buffer);
+        }
     };
 }
 
 test RingBuffer {
+    const alloc = std.testing.allocator;
+
+    var allocating_writer = std.io.Writer.Allocating.init(alloc);
+    defer allocating_writer.deinit();
+    const writer = &allocating_writer.writer;
+
     var buffer: [5]u8 = undefined;
     var ring_buffer: RingBuffer(u8) = .{
         .storage = &buffer,
     };
+
+    var rb_reader = ring_buffer.reader(&.{});
+    const reader = &rb_reader.reader;
 
     ring_buffer.writeAll(&.{ 1, 2, 3 });
     try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, ring_buffer.readableSlice(0));
     try std.testing.expectEqualSlices(u8, &.{ 2, 3 }, ring_buffer.readableSlice(1));
     try std.testing.expectEqualSlices(u8, &.{3}, ring_buffer.readableSlice(2));
     try std.testing.expectEqualSlices(u8, &.{}, ring_buffer.readableSlice(3));
-    ring_buffer.discard(3);
+
+    try std.testing.expectEqual(@as(usize, 3), try reader.stream(writer, .limited(3)));
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, allocating_writer.written());
 
     ring_buffer.writeAll(&.{ 4, 5, 6, 7, 8 });
     try std.testing.expectEqualSlices(u8, &.{ 4, 5 }, ring_buffer.readableSlice(0));
@@ -159,4 +230,9 @@ test RingBuffer {
     try std.testing.expectEqualSlices(u8, &.{}, ring_buffer.readableSlice(5));
     ring_buffer.discard(2);
     try std.testing.expectEqualSlices(u8, &.{ 6, 7, 8 }, ring_buffer.readableSlice(0));
+
+    try std.testing.expectEqual(@as(usize, 3), try reader.stream(writer, .limited(3)));
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 6, 7, 8 }, allocating_writer.written());
+
+    try std.testing.expectError(std.io.Reader.StreamError.EndOfStream, reader.stream(writer, .limited(1)));
 }

@@ -11,18 +11,18 @@ pub fn increment(self: *Self, elapsed_ns: u64) void {
 }
 
 fn vReset(timer: *Timer) void {
-    const self: *Self = @alignCast(@field(timer, "timer"));
+    const self: *Self = @alignCast(@fieldParentPtr("timer", timer));
     _ = self.counter.store(0);
 }
 
-pub fn vElapsedNS(timer: *Timer) u64 {
-    const self: *Self = @alignCast(@field(timer, "timer"));
+pub fn vRead(timer: *Timer) u64 {
+    const self: *Self = @alignCast(@fieldParentPtr("timer", timer));
     return self.counter.load();
 }
 
 timer: Timer = .{ .vtable = &.{
     .reset = &Self.vReset,
-    .elapsedNS = &Self.vElapsedNS,
+    .read = &Self.vRead,
 }},
 
 counter: kompot.sync.TearingAtomicUint(64) = .init(0),

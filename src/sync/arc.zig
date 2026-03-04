@@ -44,6 +44,8 @@ pub fn Arc(comptime T: type, comptime Deleter: type) type {
 
             self.deleter.delete(self.child);
             self.alloc.destroy(self.child);
+
+            return;
         }
 
         pub fn clone(self: Self) Self {

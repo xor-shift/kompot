@@ -51,7 +51,17 @@ fn vDoSink(sink: *Sink, message: Message) anyerror!void {
 
             .the_log_message => try self.writer.writeAll(message.payload),
 
-            .thread_id => @panic("NYI"),
+            .thread_id => {
+                try self.writer.printInt(
+                    message.thread_id,
+                    10,
+                    .lower,
+                    .{
+                        .alignment = element.alignment_kind,
+                        .width = element.alignment_width,
+                    },
+                );
+            },
             .process_id => @panic("NYI"),
             .logger_name => try self.writer.writeAll(message.logger_name),
             .level => |level| if (level.short)
