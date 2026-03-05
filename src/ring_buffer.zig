@@ -125,6 +125,11 @@ pub fn RingBuffer(comptime T: type) type {
             self.read_head += out.len;
         }
 
+        pub fn rewind(self: *Self, num_elements: usize) void {
+            std.debug.assert(self.remainingCapacity() >= num_elements);
+            self.read_head -= num_elements;
+        }
+
         pub fn discard(self: *Self, num_elements: usize) void {
             std.debug.assert(self.usedCapacity() >= num_elements);
             self.read_head += num_elements;
