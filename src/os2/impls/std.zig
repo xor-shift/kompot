@@ -105,14 +105,17 @@ pub const Semaphore = struct {
 pub const Mutex = struct {
     const Self = @This();
 
+    pub const Settings = reference.Mutex.Settings;
+
     semaphore: Semaphore,
     owner: ?Thread = null,
     lock_count: usize = 0,
 
-    pub fn init(name: [:0]const u8) Error!Self {
+    pub fn init(settings: Settings) Error!Self {
         return .{
             .semaphore = try .init(1, 1, .{
-                .name = name,
+                .name = settings.name,
+                .static_memory = settings.static_memory
             }),
         };
     }

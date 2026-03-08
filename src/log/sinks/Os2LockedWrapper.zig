@@ -10,7 +10,7 @@ pub fn Os2LockedWrapper(comptime os2: type) type {
         pub const Self = @This();
 
         pub fn init(inner: *Sink) !Self {
-            const mutex = try os2.Mutex.init("Os2LockedWrapper mutex");
+            const mutex = try os2.Mutex.init(.{ .name = "Os2LockedWrapper mutex" });
             errdefer mutex.deinit();
 
             return .{

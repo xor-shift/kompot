@@ -177,7 +177,7 @@ pub fn ConditionVariable(comptime os2: type) type {
         waitlist: std.DoublyLinkedList = .{},
 
         pub fn init() !Self {
-            var mutex = try os2.Mutex.init("a CV internal mutex");
+            var mutex = try os2.Mutex.init(.{ .name = "a CV internal mutex" });
             errdefer mutex.deinit() catch unreachable;
 
             return .{
