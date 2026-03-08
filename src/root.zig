@@ -12,6 +12,7 @@ pub const heap = @import("heap/root.zig");
 pub const log = @import("log/root.zig");
 pub const net = @import("net/root.zig");
 pub const os2 = @import("os2/root.zig");
+pub const rand = @import("rand/root.zig");
 pub const sync = @import("sync/root.zig");
 pub const wgm = @import("wgm/root.zig");
 
@@ -35,6 +36,7 @@ test {
     std.testing.refAllDecls(log);
     std.testing.refAllDecls(net);
     std.testing.refAllDecls(os2);
+    std.testing.refAllDecls(rand);
     std.testing.refAllDecls(sync);
     std.testing.refAllDecls(wgm);
 }

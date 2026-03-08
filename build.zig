@@ -39,7 +39,7 @@ pub fn build(b: *std.Build) void {
         kompot_tests.root_module.addImport("sgr", sgr);
 
         var run_kompot_tests = b.addRunArtifact(kompot_tests);
-        run_kompot_tests.has_side_effects = true;
+        // run_kompot_tests.has_side_effects = true;
         test_step.dependOn(&run_kompot_tests.step);
     }
 }
