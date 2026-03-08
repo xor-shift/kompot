@@ -230,6 +230,14 @@ pub const NamedLogger = struct {
     logger: *Logger,
     name: []const u8,
 
+    pub fn lock(self: *NamedLogger) void {
+        self.logger.lock();
+    }
+
+    pub fn unlock(self: *NamedLogger) void {
+        self.logger.unlock();
+    }
+
     fn logImpl(
         self: NamedLogger,
         src: ?std.builtin.SourceLocation,
@@ -301,13 +309,28 @@ pub const Logger = struct {
         alloc: std.mem.Allocator,
         timer: *Timer,
         clock: *Clock,
+        lock_ctx: *anyopaque,
+        lock_fun: *const fn (lock_ctx: *anyopaque) void,
+        unlock_fun: *const fn (lock_ctx: *anyopaque) void,
     ) Self {
         return .{
             .alloc = alloc,
 
             .timer = timer,
             .clock = clock,
+
+            .lock_ctx = lock_ctx,
+            .lock_fun = lock_fun,
+            .unlock_fun = unlock_fun,
         };
+    }
+
+    pub fn lock(self: *Self) void {
+        self.lock_fun(self.lock_ctx);
+    }
+
+    pub fn unlock(self: *Self) void {
+        self.unlock_fun(self.lock_ctx);
     }
 
     pub fn addSink(self: *Self, sink: *Sink) std.mem.Allocator.Error!void {
@@ -315,6 +338,9 @@ pub const Logger = struct {
     }
 
     pub fn logRaw(self: *Self, message: Message) void {
+        self.lock();
+        defer self.unlock();
+
         for (self.filters.items) |filter| {
             if (!filter.matches(message)) return;
         }
@@ -342,6 +368,10 @@ pub const Logger = struct {
 
     timer: *Timer,
     clock: *Clock,
+
+    lock_ctx: *anyopaque,
+    lock_fun: *const fn (lock_ctx: *anyopaque) void,
+    unlock_fun: *const fn (lock_ctx: *anyopaque) void,
 
     sink_error_handler_context: ?*anyopaque = null,
     sink_error_handler: *const fn (ctx: ?*anyopaque, sink: *Sink, message: Message, err: anyerror) void = struct {
