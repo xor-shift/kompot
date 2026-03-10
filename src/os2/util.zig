@@ -352,3 +352,46 @@ pub fn Channel(comptime os2: type, comptime T: type, comptime n: usize) type {
         }
     };
 }
+
+pub fn RecursiveMutex(comptime os2: type) type {
+    return struct {
+        const Self = @This();
+
+        mutex: os2.Mutex,
+        count: usize = 0,
+        owning_thread: os2.Thread.Id = os2.Thread.sentinel_id,
+
+        pub fn init(settings: os2.Mutex.Settings) !Self {
+            const mutex = try os2.Mutex.init(settings);
+            errdefer mutex.deinit();
+
+            return .{
+                .mutex = mutex,
+            };
+        }
+
+        pub fn acquire(self: *Self, timeout: os2.TimeoutNS) os2.Error!void {
+            const cur_thread = try os2.Thread.getId();
+            const owning_thread = @atomicLoad(os2.Thread.Id, &self.owning_thread, .acquire);
+
+            if (owning_thread == cur_thread) {
+                self.count += 1;
+                return;
+            }
+
+            try self.mutex.acquire(timeout);
+
+            @atomicStore(os2.Thread.Id, &self.owning_thread, cur_thread, .release);
+            std.debug.assert(self.count == 0);
+            self.count += 1;
+        }
+
+        pub fn release(self: *Self) os2.Error!void {
+            self.count -= 1;
+            if (self.count != 0) return;
+
+            @atomicStore(os2.Thread.Id, &self.owning_thread, os2.Thread.sentinel_id, .release);
+            try self.mutex.release();
+        }
+    };
+}

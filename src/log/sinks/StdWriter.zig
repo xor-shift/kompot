@@ -136,7 +136,7 @@ fn vDoSink(sink: *Sink, message: Message) anyerror!void {
         }
     }
 
-    try self.writer.writeByte('\n');
+    try self.writer.writeAll("\r\n");
 }
 
 sink: Sink = .{ .vtable = &.{

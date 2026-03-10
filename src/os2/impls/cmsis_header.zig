@@ -120,8 +120,10 @@ pub fn Impl(comptime c: type) type {
 
         pub const Thread = struct {
             pub const Settings = reference.Thread.Settings;
+            pub const Id = c.osThreadId_t;
+            pub const sentinel_id: Id = null;
 
-            handle: c.osThreadId_t,
+            handle: Id,
 
             fn makeAttrBits(flags: Settings.Flags) @FieldType(c.osThreadAttr_t, "attr_bits") {
                 var ret: @FieldType(c.osThreadAttr_t, "attr_bits") = 0;
@@ -135,6 +137,13 @@ pub fn Impl(comptime c: type) type {
 
             pub fn yield() Error!void {
                 _ = try handleError(c.osThreadYield());
+            }
+
+            pub fn getId() Error!Id {
+                const res = c.osThreadGetId();
+                if (res == null) return Error.Unspecified;
+
+                return res;
             }
 
             pub fn initRaw(

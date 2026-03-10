@@ -8,6 +8,7 @@ pub const Clock = @import("Clock.zig");
 pub const Sink = @import("Sink.zig");
 pub const Timer = @import("Timer.zig");
 
+pub const DummyClock = @import("clocks/Dummy.zig");
 pub const StdClock = @import("clocks/StdClock.zig");
 
 pub const StdTimer = @import("timers/StdTimer.zig");
@@ -230,11 +231,11 @@ pub const NamedLogger = struct {
     logger: *Logger,
     name: []const u8,
 
-    pub fn lock(self: *NamedLogger) void {
+    pub fn lock(self: NamedLogger) void {
         self.logger.lock();
     }
 
-    pub fn unlock(self: *NamedLogger) void {
+    pub fn unlock(self: NamedLogger) void {
         self.logger.unlock();
     }
 
@@ -263,8 +264,8 @@ pub const NamedLogger = struct {
         self.logger.logRaw(.{
             .src = src,
 
-            .thread_id = @intCast(std.Thread.getCurrentId()),
-            .process_id = 0,
+            .thread_id = self.logger.thread_id_getter(),
+            .process_id = self.logger.process_id_getter(),
 
             .time_point = self.logger.clock.now(),
             .ns_since_startup = self.logger.timer.read(),
@@ -275,6 +276,49 @@ pub const NamedLogger = struct {
 
             .payload = buffer,
         });
+    }
+
+    pub fn l(
+        self: NamedLogger,
+        level: Level,
+        src: std.builtin.SourceLocation,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) void {
+        self.logImpl(src, level, fmt, args) catch {};
+    }
+
+    pub fn log(
+        self: NamedLogger,
+        level: Level,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) void {
+        self.logImpl(null, level, fmt, args) catch {};
+    }
+
+    pub fn trace(self: NamedLogger, comptime fmt: []const u8, args: anytype) void {
+        self.logImpl(null, .trace, fmt, args) catch {};
+    }
+
+    pub fn debug(self: NamedLogger, comptime fmt: []const u8, args: anytype) void {
+        self.logImpl(null, .debug, fmt, args) catch {};
+    }
+
+    pub fn info(self: NamedLogger, comptime fmt: []const u8, args: anytype) void {
+        self.logImpl(null, .info, fmt, args) catch {};
+    }
+
+    pub fn warn(self: NamedLogger, comptime fmt: []const u8, args: anytype) void {
+        self.logImpl(null, .warn, fmt, args) catch {};
+    }
+
+    pub fn err(self: NamedLogger, comptime fmt: []const u8, args: anytype) void {
+        self.logImpl(null, .err, fmt, args) catch {};
+    }
+
+    pub fn fatal(self: NamedLogger, comptime fmt: []const u8, args: anytype) void {
+        self.logImpl(null, .fatal, fmt, args) catch {};
     }
 
     pub fn t(self: NamedLogger, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
@@ -312,6 +356,8 @@ pub const Logger = struct {
         lock_ctx: *anyopaque,
         lock_fun: *const fn (lock_ctx: *anyopaque) void,
         unlock_fun: *const fn (lock_ctx: *anyopaque) void,
+        thread_id_getter: *const fn () usize,
+        process_id_getter: *const fn () usize,
     ) Self {
         return .{
             .alloc = alloc,
@@ -322,6 +368,9 @@ pub const Logger = struct {
             .lock_ctx = lock_ctx,
             .lock_fun = lock_fun,
             .unlock_fun = unlock_fun,
+
+            .thread_id_getter = thread_id_getter,
+            .process_id_getter = process_id_getter,
         };
     }
 
@@ -372,6 +421,9 @@ pub const Logger = struct {
     lock_ctx: *anyopaque,
     lock_fun: *const fn (lock_ctx: *anyopaque) void,
     unlock_fun: *const fn (lock_ctx: *anyopaque) void,
+
+    thread_id_getter: *const fn () usize,
+    process_id_getter: *const fn () usize,
 
     sink_error_handler_context: ?*anyopaque = null,
     sink_error_handler: *const fn (ctx: ?*anyopaque, sink: *Sink, message: Message, err: anyerror) void = struct {
