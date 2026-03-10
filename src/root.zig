@@ -262,3 +262,47 @@ pub const deleter = struct {
         };
     }
 };
+
+pub const EscapedString = struct {
+    inner: []const u8,
+
+    pub fn format(self: EscapedString, writer: *std.io.Writer) !void {
+        const printable_start = 32;
+        const printable_end = 126;
+
+        const escapes = [_]struct { u8, u8 }{
+            .{ '\n', 'n' },
+            .{ '\r', 'r' },
+            .{ '\t', 't' },
+            .{ '\\', '\\' },
+        };
+
+        // TODO: SIMD
+        outer: for (self.inner) |c| {
+            if (c >= printable_start and c <= printable_end) {
+                try writer.writeByte(c);
+                continue;
+            }
+
+            for (escapes) |escape_pair| {
+                if (c != escape_pair.@"0") continue;
+
+                try writer.writeByte('\\');
+                try writer.writeByte(escape_pair.@"1");
+
+                continue :outer;
+            }
+
+            try writer.writeAll("\\x");
+
+            const hex_lookup: [16]u8 = .{ '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+            const nibble_0: u4 = @intCast((c >> 4) & 0xF);
+            const nibble_1: u4 = @intCast((c >> 0) & 0xF);
+
+            const nibble_0_char = hex_lookup[@intCast(nibble_0)];
+            const nibble_1_char = hex_lookup[@intCast(nibble_1)];
+
+            try writer.writeAll(&.{ nibble_0_char, nibble_1_char });
+        }
+    }
+};
