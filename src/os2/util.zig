@@ -203,7 +203,7 @@ pub fn ConditionVariable(comptime os2: type) type {
         /// Atomically unlocks a mutex and starts waiting for a `notify` or `notify_all` call.
         ///
         /// if `timeout_ns` is null, this function will wait forever.
-        pub fn wait(self: *Self, mutex: os2.Mutex, timeout: os2.TimeoutNS) !void {
+        pub fn wait(self: *Self, mutex: *os2.Mutex, timeout: os2.TimeoutNS) !void {
             var sema = try os2.Semaphore.init(1, 0, .{});
 
             var node: WaitNode = .{
