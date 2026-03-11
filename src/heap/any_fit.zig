@@ -175,35 +175,39 @@ pub fn AnyFitAllocator(comptime Strat: type) type {
             end: [*]u8,
 
             pub fn next(self: *FreelistIterator) ?Elem {
-                const next_allocation_at = self.maybe_next_allocation_at orelse {
-                    const space_at_the_end = util.mkSlice(self.free_space_start, self.end);
-                    if (space_at_the_end.len == 0) return null;
+                var ret: ?Elem = null;
+                var space: []u8 = &.{};
 
-                    defer self.free_space_start = self.end;
+                while (space.len == 0) {
+                    const next_allocation_at = self.maybe_next_allocation_at orelse {
+                        const space_at_the_end = util.mkSlice(self.free_space_start, self.end);
+                        if (space_at_the_end.len == 0) return null;
 
-                    return .{
-                        .prev = self.maybe_prev_allocation_at,
-                        .next = null,
-                        .space = space_at_the_end,
+                        defer self.free_space_start = self.end;
+
+                        return .{
+                            .prev = self.maybe_prev_allocation_at,
+                            .next = null,
+                            .space = space_at_the_end,
+                        };
                     };
-                };
 
-                const next_allocation_header: *align(1) Header = @ptrCast(next_allocation_at);
-                const next_allocation_total_space = @sizeOf(Header) + next_allocation_header.length;
-                const next_free_space_start = next_allocation_at + next_allocation_total_space;
+                    const next_allocation_header: *align(1) Header = @ptrCast(next_allocation_at);
+                    const next_allocation_total_space = @sizeOf(Header) + next_allocation_header.length;
+                    const next_free_space_start = next_allocation_at + next_allocation_total_space;
 
-                const space = util.mkSlice(self.free_space_start, next_allocation_at);
-                const ret: Elem = .{
-                    .prev = self.maybe_prev_allocation_at,
-                    .next = next_allocation_at,
-                    .space = space,
-                };
+                    space = util.mkSlice(self.free_space_start, next_allocation_at);
+                    ret = .{
+                        .prev = self.maybe_prev_allocation_at,
+                        .next = next_allocation_at,
+                        .space = space,
+                    };
 
-                self.free_space_start = next_free_space_start;
-                self.maybe_prev_allocation_at = next_allocation_at;
-                self.maybe_next_allocation_at = next_allocation_header.next;
+                    self.free_space_start = next_free_space_start;
+                    self.maybe_prev_allocation_at = next_allocation_at;
+                    self.maybe_next_allocation_at = next_allocation_header.next;
+                }
 
-                if (space.len == 0) return self.next();
                 return ret;
             }
         };
