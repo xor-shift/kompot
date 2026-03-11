@@ -235,9 +235,9 @@ pub fn testAllocator(
     // assert_consistency: *const fn (alloc: std.mem.Allocator) void,
 ) !void {
     inline for (.{
-        // cases.previousEdgeCases,
-        // cases.basicIndividualCases,
-        // cases.someRanges,
+        cases.previousEdgeCases,
+        cases.basicIndividualCases,
+        cases.someRanges,
         cases.randomised,
     }) |case_fun| {
         try case_fun(known_good, alloc_to_be_tested);

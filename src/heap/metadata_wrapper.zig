@@ -517,6 +517,46 @@ pub const SafetyWrapper = struct {
         self.race_detector.store(false, .release);
     }
 
+    pub fn stochasticLeakCheck(self: *Self) struct {
+        caller: usize,
+        count: usize,
+    } {
+        self.criticalStart();
+        defer self.criticalEnd();
+
+        var top: usize = 0;
+        var top_ct: usize = 1;
+
+        var maybe_node = self.allocation_list.first;
+        while (maybe_node) |node| {
+            maybe_node = node.next;
+
+            const header: *align(1) Header = @fieldParentPtr("list_node", node);
+
+            if (header.allocated_by == top) {
+                top_ct += 1;
+                continue;
+            }
+
+            if (top_ct == 1) {
+                top = header.allocated_by;
+            }
+        }
+
+        return .{
+            .caller = top,
+            .count = top_ct,
+        };
+    }
+
+    pub fn allocationSize(self: Self, ptr: [*]u8) usize {
+        _ = self;
+
+        const posterior_size = @sizeOf(Header) + @sizeOf(Canary);
+        const header_ptr: *align(1) Header = @ptrCast(ptr - posterior_size);
+        return header_ptr.length;
+    }
+
     inner: AllocatorWithHooks(Callbacks),
 
     race_detector: std.atomic.Value(bool) = .init(false),
