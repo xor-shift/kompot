@@ -374,6 +374,11 @@ pub const Logger = struct {
         };
     }
 
+    pub fn deinit(self: *Self) void {
+        self.sinks.deinit(self.alloc);
+        self.filters.deinit(self.alloc);
+    }
+
     pub fn lock(self: *Self) void {
         self.lock_fun(self.lock_ctx);
     }

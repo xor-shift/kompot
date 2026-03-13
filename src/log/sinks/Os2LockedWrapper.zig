@@ -19,6 +19,10 @@ pub fn Os2LockedWrapper(comptime os2: type) type {
             };
         }
 
+        pub fn deinit(self: *Self) void {
+            self.deinit();
+        }
+
         fn vDoSink(sink: *Sink, message: Message) anyerror!void {
             const self: *Self = @alignCast(@fieldParentPtr("sink", sink));
 
