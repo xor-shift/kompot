@@ -125,6 +125,13 @@ pub const default_patterns = struct {
         },
         Element{ .flag = .{ .literal_string = "] " } },
         Element{ .flag = .logger_name },
+        Element{ .flag = .{ .literal_string = " (" } },
+        // Element{ .flag = .source_function },
+        // Element{ .flag = .{ .literal_string = " @ " } },
+        Element{ .flag = .{ .source = .{ .full_path = false } } },
+        Element{ .flag = .{ .literal_string = ":" } },
+        Element{ .flag = .source_line },
+        Element{ .flag = .{ .literal_string = ")" } },
         Element{ .flag = .{ .literal_string = ": " } },
         Element{ .flag = .the_log_message },
     };

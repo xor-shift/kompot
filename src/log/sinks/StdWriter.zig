@@ -81,7 +81,7 @@ fn vDoSink(sink: *Sink, message: Message) anyerror!void {
                 if (source.full_path) {
                     try self.writer.writeAll(src.file);
                 } else {
-                    try self.writer.writeAll(src.file);
+                    try self.writer.writeAll(std.fs.path.basename(src.file));
                 }
             } else {
                 try self.writer.writeAll("???");
