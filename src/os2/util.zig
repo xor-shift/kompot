@@ -370,6 +370,10 @@ pub fn RecursiveMutex(comptime os2: type) type {
             };
         }
 
+        pub fn deinit(self: Self) void {
+            self.mutex.deinit() catch unreachable;
+        }
+
         pub fn acquire(self: *Self, timeout: os2.TimeoutNS) os2.Error!void {
             const cur_thread = try os2.Thread.getId();
             const owning_thread = @atomicLoad(os2.Thread.Id, &self.owning_thread, .acquire);

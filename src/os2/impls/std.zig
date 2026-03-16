@@ -10,7 +10,14 @@ pub fn delay(nanoseconds: u64) void {
 }
 
 pub const Thread = struct {
+    pub const Id = std.Thread.Id;
+    pub const sentinel_id: Id = 0;
+
     handle: std.Thread.Id,
+
+    pub fn getId() Error!Id {
+        return std.Thread.getCurrentId();
+    }
 };
 
 pub const Semaphore = struct {
