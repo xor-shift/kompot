@@ -6,7 +6,7 @@ pub const Flag = union(enum) {
 
     the_log_message,
 
-    thread_id,
+    thread_id: struct { display_name_if_available: bool = false },
     process_id,
     logger_name,
     level: struct { short: bool = false },
@@ -113,9 +113,9 @@ pub const default_patterns = struct {
         Element{ .flag = .{ .level = .{ .short = true } } },
         Element{ .flag = .{ .literal_string = " (" } },
         Element{
-            .flag = .thread_id,
+            .flag = .{ .thread_id = .{ .display_name_if_available = true } },
             .alignment_kind = .right,
-            .alignment_width = "4294967295".len,
+            .alignment_width = "   4294967295".len,
         },
         Element{ .flag = .{ .literal_string = ") [" } },
         Element{

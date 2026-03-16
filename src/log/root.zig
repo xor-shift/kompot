@@ -33,6 +33,9 @@ pub const Message = struct {
     thread_id: usize,
     process_id: usize,
 
+    thread_name_buffer: [64]u8,
+    thread_name_length: ?usize,
+
     ns_since_startup: u64,
     time_point: Clock.TimePoint,
 
@@ -261,11 +264,21 @@ pub const NamedLogger = struct {
             writer.print(fmt, args) catch unreachable;
         }
 
+        const thread_id = self.logger.thread_id_getter();
+        var thread_name_buffer: [64]u8 = undefined;
+        const thread_name_length = if (self.logger.thread_name_getter(thread_id, &thread_name_buffer)) |name|
+            name.len
+        else
+            null;
+
         self.logger.logRaw(.{
             .src = src,
 
-            .thread_id = self.logger.thread_id_getter(),
+            .thread_id = thread_id,
             .process_id = self.logger.process_id_getter(),
+
+            .thread_name_buffer = thread_name_buffer,
+            .thread_name_length = thread_name_length,
 
             .time_point = self.logger.clock.now(),
             .ns_since_startup = self.logger.timer.read(),
@@ -357,6 +370,7 @@ pub const Logger = struct {
         lock_fun: *const fn (lock_ctx: *anyopaque) void,
         unlock_fun: *const fn (lock_ctx: *anyopaque) void,
         thread_id_getter: *const fn () usize,
+        thread_name_getter: *const fn (id: usize, name_buf: []u8) ?[]const u8,
         process_id_getter: *const fn () usize,
     ) Self {
         return .{
@@ -370,6 +384,7 @@ pub const Logger = struct {
             .unlock_fun = unlock_fun,
 
             .thread_id_getter = thread_id_getter,
+            .thread_name_getter = thread_name_getter,
             .process_id_getter = process_id_getter,
         };
     }
@@ -428,6 +443,7 @@ pub const Logger = struct {
     unlock_fun: *const fn (lock_ctx: *anyopaque) void,
 
     thread_id_getter: *const fn () usize,
+    thread_name_getter: *const fn (id: usize, name_buf: []u8) ?[]const u8,
     process_id_getter: *const fn () usize,
 
     sink_error_handler_context: ?*anyopaque = null,

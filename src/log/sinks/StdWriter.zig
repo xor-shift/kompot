@@ -51,16 +51,24 @@ fn vDoSink(sink: *Sink, message: Message) anyerror!void {
 
             .the_log_message => try self.writer.writeAll(message.payload),
 
-            .thread_id => {
-                try self.writer.printInt(
-                    message.thread_id,
-                    10,
-                    .lower,
-                    .{
+            .thread_id => |thread_id| {
+                if (thread_id.display_name_if_available and message.thread_name_length != null) {
+                    const thread_name = message.thread_name_buffer[0..message.thread_name_length.?];
+                    try self.writer.printValue("s", std.fmt.Options{
                         .alignment = element.alignment_kind,
                         .width = element.alignment_width,
-                    },
-                );
+                    }, thread_name, 0);
+                } else {
+                    try self.writer.printInt(
+                        message.thread_id,
+                        10,
+                        .lower,
+                        .{
+                            .alignment = element.alignment_kind,
+                            .width = element.alignment_width,
+                        },
+                    );
+                }
             },
             .process_id => @panic("NYI"),
             .logger_name => try self.writer.writeAll(message.logger_name),
