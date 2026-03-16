@@ -293,8 +293,8 @@ pub const NamedLogger = struct {
 
     pub fn l(
         self: NamedLogger,
+        src: ?std.builtin.SourceLocation,
         level: Level,
-        src: std.builtin.SourceLocation,
         comptime fmt: []const u8,
         args: anytype,
     ) void {
@@ -334,27 +334,27 @@ pub const NamedLogger = struct {
         self.logImpl(null, .fatal, fmt, args) catch {};
     }
 
-    pub fn t(self: NamedLogger, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    pub fn t(self: NamedLogger, src: ?std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
         self.logImpl(src, .trace, fmt, args) catch {};
     }
 
-    pub fn d(self: NamedLogger, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    pub fn d(self: NamedLogger, src: ?std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
         self.logImpl(src, .debug, fmt, args) catch {};
     }
 
-    pub fn i(self: NamedLogger, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    pub fn i(self: NamedLogger, src: ?std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
         self.logImpl(src, .info, fmt, args) catch {};
     }
 
-    pub fn w(self: NamedLogger, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    pub fn w(self: NamedLogger, src: ?std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
         self.logImpl(src, .warn, fmt, args) catch {};
     }
 
-    pub fn e(self: NamedLogger, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    pub fn e(self: NamedLogger, src: ?std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
         self.logImpl(src, .err, fmt, args) catch {};
     }
 
-    pub fn f(self: NamedLogger, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    pub fn f(self: NamedLogger, src: ?std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
         self.logImpl(src, .fatal, fmt, args) catch {};
     }
 };
