@@ -59,7 +59,10 @@ pub fn TearingAtomicUint(comptime bits: usize) type {
             const ret_bytes = std.mem.asBytes(&ret);
             const data_bytes = std.mem.asBytes(&data);
 
-            @memcpy(ret_bytes, data_bytes);
+            const to_copy = @min(ret_bytes.len, data_bytes.len);
+
+            @memset(ret_bytes, 0);
+            @memcpy(ret_bytes[0..to_copy], data_bytes[0..to_copy]);
 
             return ret;
         }
@@ -70,7 +73,10 @@ pub fn TearingAtomicUint(comptime bits: usize) type {
             const ret_bytes = std.mem.asBytes(&ret);
             const int_bytes = std.mem.asBytes(&int);
 
-            @memcpy(ret_bytes, int_bytes);
+            const to_copy = @min(ret_bytes.len, int_bytes.len);
+
+            @memset(ret_bytes, 0);
+            @memcpy(ret_bytes[0..to_copy], int_bytes[0..to_copy]);
 
             return ret;
         }
