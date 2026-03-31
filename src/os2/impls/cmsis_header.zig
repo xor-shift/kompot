@@ -69,6 +69,14 @@ pub fn Impl(comptime c: type) type {
         }
 
         pub const kernel = struct {
+            pub const State = enum {
+                inactive,
+                ready,
+                running,
+                locked,
+                suspended,
+            };
+
             pub fn initialize() Error!void {
                 _ = try handleError(c.osKernelInitialize());
             }
@@ -115,6 +123,19 @@ pub fn Impl(comptime c: type) type {
                 if (res == 1) return true;
 
                 unreachable;
+            }
+
+            pub fn getState() Error!State {
+                const state_raw = c.osKernelGetState();
+                const state: State = switch (state_raw) {
+                    c.osKernelInactive => State.inactive,
+                    c.osKernelReady => State.ready,
+                    c.osKernelRunning => State.running,
+                    c.osKernelLocked => State.locked,
+                    c.osKernelSuspended => State.suspended,
+                    else => return Error.Unspecified,
+                };
+                return state;
             }
         };
 
