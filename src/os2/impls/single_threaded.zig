@@ -46,7 +46,6 @@ pub const TimeoutNS = enum(u64) {
 /// not running or that no *READY* thread exists.
 pub fn delay(nanoseconds: u64) Error!void {
     _ = nanoseconds;
-    @panic("not implemented");
 }
 
 pub const Thread = struct {

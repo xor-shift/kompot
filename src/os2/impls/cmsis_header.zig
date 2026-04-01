@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const reference = @import("reference.zig");
+const reference = @import("single_threaded.zig");
 
 /// pass something like:
 ///
