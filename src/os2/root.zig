@@ -3,9 +3,13 @@ const std = @import("std");
 
 pub const util = @import("util.zig");
 
+const single_threaded_mod = @import("impls/single_threaded.zig");
+
 pub const impls = struct {
+    pub const reference = single_threaded_mod.Impl(single_threaded_mod.DummySupportFunctions);
+
     /// This contains stubs and documentation
-    pub const single_threaded = @import("impls/single_threaded.zig");
+    pub const SingleThreaded = single_threaded_mod.Impl;
 
     /// This is the implementation based on `cmsis_os2.h`
     pub const cmsis_os2 = @import("impls/cmsis_header.zig");

@@ -1,6 +1,8 @@
 const std = @import("std");
 
-const reference = @import("single_threaded.zig");
+const os2 = @import("../root.zig");
+
+const reference = os2.impls.reference;
 
 pub const Error = reference.Error;
 pub const TimeoutNS = reference.TimeoutNS;

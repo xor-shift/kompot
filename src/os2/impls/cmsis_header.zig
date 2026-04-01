@@ -1,6 +1,8 @@
 const std = @import("std");
 
-const reference = @import("single_threaded.zig");
+const os2 = @import("../root.zig");
+
+const reference = os2.impls.reference;
 
 /// pass something like:
 ///
@@ -69,13 +71,7 @@ pub fn Impl(comptime c: type) type {
         }
 
         pub const kernel = struct {
-            pub const State = enum {
-                inactive,
-                ready,
-                running,
-                locked,
-                suspended,
-            };
+            pub const State = reference.kernel.State;
 
             pub fn initialize() Error!void {
                 _ = try handleError(c.osKernelInitialize());
@@ -83,7 +79,7 @@ pub fn Impl(comptime c: type) type {
 
             pub fn start() Error!noreturn {
                 _ = try handleError(c.osKernelStart());
-                unreachable;
+                @panic("kernel returned");
             }
 
             /// The return value represents the previous lock state.
