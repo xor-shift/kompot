@@ -16,6 +16,9 @@ pub const rand = @import("rand/root.zig");
 pub const sync = @import("sync/root.zig");
 pub const wgm = @import("wgm/root.zig");
 
+pub const HyperGraph = @import("HyperGraph.zig");
+pub const HyperGraphScheduler = @import("HyperGraphScheduler.zig");
+
 pub const RingBuffer = ring_buffer.RingBuffer;
 
 const std = @import("std");
@@ -39,6 +42,9 @@ test {
     std.testing.refAllDecls(rand);
     std.testing.refAllDecls(sync);
     std.testing.refAllDecls(wgm);
+
+    std.testing.refAllDecls(HyperGraph);
+    std.testing.refAllDecls(HyperGraphScheduler);
 }
 
 // std.io.Writer.Discarding has references to files
