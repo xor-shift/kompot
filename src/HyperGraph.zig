@@ -13,6 +13,10 @@ pub const Vertex = struct {
 
     // redundant field
     needed_by: std.ArrayList(EdgeHandle) = .empty,
+
+    //redundant field
+    handle: VertexHandle,
+
     produced_by: ?EdgeHandle = null,
 };
 
@@ -82,16 +86,19 @@ pub fn addVertex(
     observable: bool,
     vertex: *Vertex,
 ) !VertexHandle {
+    const handle: VertexHandle = .{
+        .inner = self.all_vertices.items.len,
+    };
+
     vertex.* = .{
         .directly_observable = observable,
+        .handle = handle,
     };
 
     try self.all_vertices.append(self.alloc, vertex);
     errdefer self.all_vertices.pop().?;
 
-    return .{
-        .inner = self.all_vertices.items.len - 1,
-    };
+    return handle;
 }
 
 /// `from_vertices` and `to_vertices` will be duplicated on `self.alloc`,
