@@ -98,7 +98,7 @@ test Self {
 
     const getValues = struct {
         fn aufruf(list_: *Self) ![]usize {
-            var arraylist: std.ArrayListUnmanaged(usize) = .{};
+            var arraylist: std.ArrayList(usize) = .empty;
 
             var iterator = list_.iterate();
             while (iterator.next()) |list_node| {

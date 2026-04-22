@@ -14,21 +14,21 @@ pub const Reader = struct {
         },
     };
 
-    inner: *std.io.Reader,
+    inner: *std.Io.Reader,
 
-    reader: std.io.Reader,
+    reader: std.Io.Reader,
 
     state: State = .{ .normal = .{
         .expecting_overhead = true,
         .next_offset_in = 0,
     } },
 
-    pub fn init(inner: *std.io.Reader, buffer: []u8) Self {
+    pub fn init(inner: *std.Io.Reader, buffer: []u8) Self {
         return .{
             .inner = inner,
             .reader = .{
                 .buffer = buffer,
-                .vtable = &std.io.Reader.VTable{
+                .vtable = &std.Io.Reader.VTable{
                     .stream = &Self.stream,
                 },
                 .seek = 0,
@@ -44,11 +44,11 @@ pub const Reader = struct {
         } };
     }
 
-    pub fn stream(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
+    pub fn stream(r: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
         const self: *Self = @fieldParentPtr("reader", r);
 
         var state = switch (self.state) {
-            .waiting_restart => return std.io.Reader.StreamError.EndOfStream,
+            .waiting_restart => return std.Io.Reader.StreamError.EndOfStream,
             .normal => |v| v,
         };
 
@@ -108,14 +108,14 @@ test Reader {
     } //
         ++ [_]u8{0xFF} ++ ([_]u8{0x55} ** 254) //
         ++ [_]u8{0xFE} ++ ([_]u8{0xAA} ** 250 ++ [_]u8{ 0xAB, 0xAC, 0xAD }) ++ [_]u8{0x00};
-    var raw_cobs_reader = std.io.Reader.fixed(&cobs_input);
+    var raw_cobs_reader = std.Io.Reader.fixed(&cobs_input);
     var cobs_reader = Reader.init(&raw_cobs_reader, &.{});
 
     var output_buffer: [5 + 254 + 253]u8 = undefined;
-    var decoded_writer = std.io.Writer.fixed(&output_buffer);
+    var decoded_writer = std.Io.Writer.fixed(&output_buffer);
     try std.testing.expectEqual(5, try cobs_reader.reader.stream(&decoded_writer, .unlimited));
     try std.testing.expectError(
-        std.io.Reader.StreamError.EndOfStream,
+        std.Io.Reader.StreamError.EndOfStream,
         cobs_reader.reader.stream(&decoded_writer, .unlimited),
     );
 
@@ -126,7 +126,7 @@ test Reader {
 
         while (true) {
             const curr_read = cobs_reader.reader.stream(&decoded_writer, .unlimited) catch |e| switch (e) {
-                std.io.Reader.StreamError.EndOfStream => {
+                std.Io.Reader.StreamError.EndOfStream => {
                     // std.log.debug("end of stream from cobs_reader", .{});
                     break;
                 },

@@ -73,7 +73,7 @@ pub fn Fat(comptime kind: PtrKind, comptime IFace: type) type {
 
             comptime std.debug.assert(type_info.size == .one);
             comptime std.debug.assert(!type_info.is_volatile);
-            comptime std.debug.assert(type_info.alignment == @alignOf(Concrete));
+            comptime std.debug.assert(type_info.alignment orelse @alignOf(Concrete) == @alignOf(Concrete));
             comptime std.debug.assert(type_info.address_space == .generic);
             comptime std.debug.assert(!type_info.is_allowzero);
             comptime std.debug.assert(type_info.sentinel_ptr == null);

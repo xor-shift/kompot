@@ -34,10 +34,7 @@ test raster {
 
 pub const morton = struct {
     pub inline fn forward(comptime depth: usize, coords: [3]usize) usize {
-        const T = @Type(std.builtin.Type{ .int = .{
-            .bits = @intCast(depth),
-            .signedness = .unsigned,
-        } });
+        const T = @Int(.unsigned, @intCast(depth));
 
         const pad = bit.stuff_3_zeroes_left;
 

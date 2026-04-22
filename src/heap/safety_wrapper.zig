@@ -360,7 +360,7 @@ fn vResize(
 test Self {
     const tester = @import("allocator_tester.zig");
 
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .{};
     var safe_gpa: Self = .{ .inner = gpa.allocator() };
     const alloc = safe_gpa.allocator();
 

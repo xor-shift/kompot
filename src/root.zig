@@ -7,11 +7,9 @@ pub const curves = @import("curves.zig");
 pub const meta = @import("meta.zig");
 pub const poly = @import("poly.zig");
 
-pub const fmt = @import("fmt/root.zig");
 pub const heap = @import("heap/root.zig");
 pub const log = @import("log/root.zig");
 pub const net = @import("net/root.zig");
-pub const os2 = @import("os2/root.zig");
 pub const rand = @import("rand/root.zig");
 pub const sync = @import("sync/root.zig");
 pub const wgm = @import("wgm/root.zig");
@@ -34,11 +32,9 @@ test {
     std.testing.refAllDecls(poly);
     std.testing.refAllDecls(ring_buffer);
 
-    std.testing.refAllDecls(fmt);
     std.testing.refAllDecls(heap);
     std.testing.refAllDecls(log);
     std.testing.refAllDecls(net);
-    std.testing.refAllDecls(os2);
     std.testing.refAllDecls(rand);
     std.testing.refAllDecls(sync);
     std.testing.refAllDecls(wgm);
@@ -47,10 +43,10 @@ test {
     std.testing.refAllDecls(HyperGraphScheduler);
 }
 
-// std.io.Writer.Discarding has references to files
+// std.Io.Writer.Discarding has references to files
 pub const DiscardingWriterNoFiles = struct {
     count: usize,
-    writer: std.io.Writer,
+    writer: std.Io.Writer,
 
     pub fn init(buffer: []u8) DiscardingWriterNoFiles {
         return .{
@@ -68,7 +64,7 @@ pub const DiscardingWriterNoFiles = struct {
         return d.count + d.writer.end;
     }
 
-    pub fn drain(w: *std.io.Writer, data: []const []const u8, splat: usize) std.io.Writer.Error!usize {
+    pub fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
         const d: *DiscardingWriterNoFiles = @alignCast(@fieldParentPtr("writer", w));
 
         const slice = data[0 .. data.len - 1];
@@ -272,7 +268,7 @@ pub const deleter = struct {
 pub const EscapedString = struct {
     inner: []const u8,
 
-    pub fn format(self: EscapedString, writer: *std.io.Writer) !void {
+    pub fn format(self: EscapedString, writer: *std.Io.Writer) !void {
         const printable_start = 32;
         const printable_end = 126;
 

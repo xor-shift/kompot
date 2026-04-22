@@ -322,8 +322,9 @@ pub fn TearingAtomicUint(comptime bits: usize) type {
 const TestContextBase = struct {
     const Self = @This();
 
-    go_signal_mutex: std.Thread.Mutex = .{},
-    go_signal_cv: std.Thread.Condition = .{},
+    io: std.Io,
+    go_signal_mutex: std.Io.Mutex = .init,
+    go_signal_cv: std.Io.Condition = .init,
     go_signal: bool = false,
     bail_signal: bool = false,
 
@@ -352,32 +353,32 @@ const TestContextBase = struct {
 
     /// if this returns true, proceed, otherwise bail.
     pub fn threadWait(self: *Self) bool {
-        self.go_signal_mutex.lock();
-        defer self.go_signal_mutex.unlock();
+        self.go_signal_mutex.lock(self.io) catch return false;
+        defer self.go_signal_mutex.unlock(self.io);
 
         while (true) {
             if (self.bail_signal) return false;
             if (self.go_signal) return true;
 
-            self.go_signal_cv.wait(&self.go_signal_mutex);
+            self.go_signal_cv.wait(self.io, &self.go_signal_mutex) catch return false;
         }
     }
 
-    fn giveSignal(self: *Self, go: bool) void {
-        self.go_signal_mutex.lock();
-        defer self.go_signal_mutex.unlock();
+    fn giveSignal(self: *Self, go: bool) !void {
+        try self.go_signal_mutex.lock(self.io);
+        defer self.go_signal_mutex.unlock(self.io);
 
         if (go) self.go_signal = true else self.bail_signal = true;
 
-        self.go_signal_cv.broadcast();
+        self.go_signal_cv.broadcast(self.io);
     }
 
     pub fn giveGoSignal(self: *Self) void {
-        self.giveSignal(true);
+        self.giveSignal(true) catch {};
     }
 
     pub fn giveBailSignal(self: *Self) void {
-        self.giveSignal(false);
+        self.giveSignal(false) catch {};
     }
 };
 
@@ -388,7 +389,7 @@ test TearingAtomicUint {
     var the_buffer: [k_no_threads * k_iters]usize = .{0} ** (k_no_threads * k_iters);
 
     const Context = struct {
-        base: TestContextBase = .{},
+        base: TestContextBase,
 
         the_buffer: []usize,
         the_integer: TearingAtomicUint(321) = .{},
@@ -410,7 +411,11 @@ test TearingAtomicUint {
         }
     };
 
+    var io: std.Io.Threaded = .init(std.testing.allocator, .{});
     var context: Context = .{
+        .base = .{
+            .io = io.io(),
+        },
         .the_buffer = &the_buffer,
     };
 

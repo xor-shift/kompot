@@ -15,7 +15,7 @@ pub const StdTimer = @import("timers/StdTimer.zig");
 pub const IncrementedTimer = @import("timers/Incremented.zig");
 
 pub const StdWriterSink = @import("sinks/StdWriter.zig");
-pub const Os2LockedWrapperSink = @import("sinks/Os2LockedWrapper.zig").Os2LockedWrapper;
+pub const LockedWrapperSink = @import("sinks/LockedWrapper.zig");
 
 pub const Level = enum(u32) {
     off = 0,
@@ -30,8 +30,8 @@ pub const Level = enum(u32) {
 pub const Message = struct {
     src: ?std.builtin.SourceLocation,
 
-    thread_id: usize,
-    process_id: usize,
+    thread_id: ?u64,
+    process_id: ?u64,
 
     thread_name_buffer: [64]u8,
     thread_name_length: ?usize,
@@ -260,22 +260,24 @@ pub const NamedLogger = struct {
         defer self.alloc.free(buffer);
 
         {
-            var writer = std.io.Writer.fixed(buffer);
+            var writer = std.Io.Writer.fixed(buffer);
             writer.print(fmt, args) catch unreachable;
         }
 
-        const thread_id = self.logger.thread_id_getter();
+        const maybe_thread_id = self.logger.impl.getThreadId();
+        const maybe_process_id = self.logger.impl.getProcessId();
+
         var thread_name_buffer: [64]u8 = undefined;
-        const thread_name_length = if (self.logger.thread_name_getter(thread_id, &thread_name_buffer)) |name|
-            name.len
+        const thread_name_length = if (self.logger.impl.getThreadName(maybe_thread_id, &thread_name_buffer)) |name_len|
+            name_len
         else
             null;
 
         self.logger.logRaw(.{
             .src = src,
 
-            .thread_id = thread_id,
-            .process_id = self.logger.process_id_getter(),
+            .thread_id = maybe_thread_id,
+            .process_id = maybe_process_id,
 
             .thread_name_buffer = thread_name_buffer,
             .thread_name_length = thread_name_length,
@@ -362,16 +364,62 @@ pub const NamedLogger = struct {
 pub const Logger = struct {
     const Self = @This();
 
+    pub const Impl = struct {
+        pub const VTable = struct {
+            lock: *const fn (impl: *Impl, lock_ptr: ?*anyopaque) anyerror!void = defaultLock,
+            unlock: *const fn (impl: *Impl, lock_ptr: ?*anyopaque) void = defaultUnlock,
+
+            get_thread_id: *const fn (impl: *Impl) ?u64 = defaultGetThreadId,
+            get_process_id: *const fn (impl: *Impl) ?u64 = defaultGetProcessId,
+
+            get_thread_name: *const fn (impl: *Impl, id: ?u64, name_buf: []u8) ?usize = defaultGetThreadName,
+        };
+
+        fn defaultLock(_: *Impl, _: ?*anyopaque) anyerror!void {}
+
+        fn defaultUnlock(_: *Impl, _: ?*anyopaque) void {}
+
+        fn defaultGetThreadId(_: *Impl) ?u64 {
+            return null;
+        }
+
+        fn defaultGetProcessId(_: *Impl) ?u64 {
+            return null;
+        }
+
+        fn defaultGetThreadName(_: *Impl, _: ?u64, _: []u8) ?usize {
+            return null;
+        }
+
+        pub fn lock(impl: *Impl, mutex: ?*anyopaque) anyerror!void {
+            return impl.vtable.lock(impl, mutex);
+        }
+
+        pub fn unlock(impl: *Impl, mutex: ?*anyopaque) void {
+            return impl.vtable.unlock(impl, mutex);
+        }
+
+        pub fn getThreadId(impl: *Impl) ?u64 {
+            return impl.vtable.get_thread_id(impl);
+        }
+
+        pub fn getProcessId(impl: *Impl) ?u64 {
+            return impl.vtable.get_process_id(impl);
+        }
+
+        pub fn getThreadName(impl: *Impl, thread_id: ?u64, name_buf: []u8) ?u64 {
+            return impl.vtable.get_thread_name(impl, thread_id, name_buf);
+        }
+
+        vtable: *const VTable,
+    };
+
     pub fn init(
         alloc: std.mem.Allocator,
         timer: *Timer,
         clock: *Clock,
         lock_ctx: *anyopaque,
-        lock_fun: *const fn (lock_ctx: *anyopaque) void,
-        unlock_fun: *const fn (lock_ctx: *anyopaque) void,
-        thread_id_getter: *const fn () usize,
-        thread_name_getter: *const fn (id: usize, name_buf: []u8) ?[]const u8,
-        process_id_getter: *const fn () usize,
+        impl: *Impl,
     ) Self {
         return .{
             .alloc = alloc,
@@ -380,12 +428,7 @@ pub const Logger = struct {
             .clock = clock,
 
             .lock_ctx = lock_ctx,
-            .lock_fun = lock_fun,
-            .unlock_fun = unlock_fun,
-
-            .thread_id_getter = thread_id_getter,
-            .thread_name_getter = thread_name_getter,
-            .process_id_getter = process_id_getter,
+            .impl = impl,
         };
     }
 
@@ -394,12 +437,12 @@ pub const Logger = struct {
         self.filters.deinit(self.alloc);
     }
 
-    pub fn lock(self: *Self) void {
-        self.lock_fun(self.lock_ctx);
+    pub fn lock(self: *Self) anyerror!void {
+        try self.impl.lock(self.lock_ctx);
     }
 
     pub fn unlock(self: *Self) void {
-        self.unlock_fun(self.lock_ctx);
+        self.impl.unlock(self.lock_ctx);
     }
 
     pub fn addSink(self: *Self, sink: *Sink) std.mem.Allocator.Error!void {
@@ -407,7 +450,9 @@ pub const Logger = struct {
     }
 
     pub fn logRaw(self: *Self, message: Message) void {
-        self.lock();
+        self.lock() catch {
+            @panic("unhandled error");
+        };
         defer self.unlock();
 
         for (self.filters.items) |filter| {
@@ -439,12 +484,7 @@ pub const Logger = struct {
     clock: *Clock,
 
     lock_ctx: *anyopaque,
-    lock_fun: *const fn (lock_ctx: *anyopaque) void,
-    unlock_fun: *const fn (lock_ctx: *anyopaque) void,
-
-    thread_id_getter: *const fn () usize,
-    thread_name_getter: *const fn (id: usize, name_buf: []u8) ?[]const u8,
-    process_id_getter: *const fn () usize,
+    impl: *Impl,
 
     sink_error_handler_context: ?*anyopaque = null,
     sink_error_handler: *const fn (ctx: ?*anyopaque, sink: *Sink, message: Message, err: anyerror) void = struct {

@@ -59,7 +59,7 @@ const util = struct {
 
         free_fun: *const FreeFun,
 
-        fn shuffle(list: *std.ArrayListUnmanaged(SavedAlloc)) void {
+        fn shuffle(list: *std.ArrayList(SavedAlloc)) void {
             var xoshiro = getXoshiro(16);
             const random = xoshiro.random();
 
@@ -67,7 +67,7 @@ const util = struct {
         }
 
         fn freeLastN(
-            list: *std.ArrayListUnmanaged(SavedAlloc),
+            list: *std.ArrayList(SavedAlloc),
             alloc: std.mem.Allocator,
             n: usize,
         ) void {
@@ -81,14 +81,14 @@ const util = struct {
         }
 
         fn freeAll(
-            list: *std.ArrayListUnmanaged(SavedAlloc),
+            list: *std.ArrayList(SavedAlloc),
             alloc: std.mem.Allocator,
         ) void {
             freeLastN(list, alloc, list.items.len);
         }
 
         fn shuffleAndFreeLastN(
-            list: *std.ArrayListUnmanaged(SavedAlloc),
+            list: *std.ArrayList(SavedAlloc),
             alloc: std.mem.Allocator,
             n: usize,
         ) void {
@@ -97,7 +97,7 @@ const util = struct {
         }
 
         fn shuffleAndFreeAll(
-            list: *std.ArrayListUnmanaged(SavedAlloc),
+            list: *std.ArrayList(SavedAlloc),
             alloc: std.mem.Allocator,
         ) void {
             shuffle(list);
@@ -119,7 +119,7 @@ const util = struct {
 
     fn doAndSaveAlloc(
         known_good: std.mem.Allocator,
-        into: *std.ArrayListUnmanaged(SavedAlloc),
+        into: *std.ArrayList(SavedAlloc),
         alloc: std.mem.Allocator,
         comptime T: type,
         len: usize,
@@ -150,7 +150,7 @@ const cases = struct {
         known_good: std.mem.Allocator,
         alloc: std.mem.Allocator,
     ) !void {
-        var list: std.ArrayListUnmanaged(util.SavedAlloc) = try .initCapacity(known_good, 0);
+        var list: std.ArrayList(util.SavedAlloc) = try .initCapacity(known_good, 0);
         defer list.deinit(known_good);
         defer util.SavedAlloc.shuffleAndFreeAll(&list, alloc);
 
@@ -164,7 +164,7 @@ const cases = struct {
         known_good: std.mem.Allocator,
         alloc: std.mem.Allocator,
     ) !void {
-        var list: std.ArrayListUnmanaged(util.SavedAlloc) = try .initCapacity(known_good, 0);
+        var list: std.ArrayList(util.SavedAlloc) = try .initCapacity(known_good, 0);
         defer list.deinit(known_good);
         defer util.SavedAlloc.shuffleAndFreeAll(&list, alloc);
 
@@ -180,7 +180,7 @@ const cases = struct {
         known_good: std.mem.Allocator,
         alloc: std.mem.Allocator,
     ) !void {
-        var list: std.ArrayListUnmanaged(util.SavedAlloc) = try .initCapacity(known_good, 0);
+        var list: std.ArrayList(util.SavedAlloc) = try .initCapacity(known_good, 0);
         defer list.deinit(known_good);
         defer util.SavedAlloc.shuffleAndFreeAll(&list, alloc);
 
@@ -191,7 +191,7 @@ const cases = struct {
             for (0..1024) |_| {
                 const Closure = struct {
                     known_good: std.mem.Allocator,
-                    list: *std.ArrayListUnmanaged(util.SavedAlloc),
+                    list: *std.ArrayList(util.SavedAlloc),
                     alloc: std.mem.Allocator,
                     len: usize,
 

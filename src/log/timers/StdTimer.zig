@@ -8,28 +8,28 @@ const Timer = log.Timer;
 
 const Self = @This();
 
-pub fn init() Self {
+pub fn init(io: std.Io) Self {
     return .{
-        .std_timer = std.time.Timer.start() catch unreachable,
+        .io = io,
     };
 }
 
 fn vReset(timer: *Timer) void {
     const self: *Self = @alignCast(@fieldParentPtr("timer", timer));
 
-    self.mutex.lock();
-    defer self.mutex.unlock();
+    self.mutex.lock(self.io) catch return;
+    defer self.mutex.unlock(self.io);
 
-    self.std_timer.reset();
+    self.base = std.Io.Timestamp.now(self.io, .awake).nanoseconds;
 }
 
 fn vRead(timer: *Timer) u64 {
     const self: *Self = @alignCast(@fieldParentPtr("timer", timer));
 
-    self.mutex.lock();
-    defer self.mutex.unlock();
+    self.mutex.lock(self.io) catch return 0; // TODO
+    defer self.mutex.unlock(self.io);
 
-    return self.std_timer.read();
+    return @intCast(std.Io.Timestamp.now(self.io, .awake).nanoseconds - self.base);
 }
 
 timer: Timer = .{ .vtable = &.{
@@ -37,5 +37,7 @@ timer: Timer = .{ .vtable = &.{
     .read = &Self.vRead,
 } },
 
-mutex: std.Thread.Mutex = .{},
-std_timer: std.time.Timer,
+io: std.Io,
+
+mutex: std.Io.Mutex = .init,
+base: i96 = 0,

@@ -295,7 +295,7 @@ pub const DummyCallbacks = struct {
 };
 
 test "AllocatorWithHooks with DummyCallbacks" {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .{};
     var wrapped: AllocatorWithHooks(DummyCallbacks) = .init(gpa.allocator());
     const alloc = wrapped.allocator();
 
@@ -564,7 +564,7 @@ pub const SafetyWrapper = struct {
 };
 
 test SafetyWrapper {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .{};
     var wrapper: SafetyWrapper = .init(gpa.allocator());
     const alloc = wrapper.allocator();
 

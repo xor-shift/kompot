@@ -136,10 +136,10 @@ test s3zl_impl {
 }
 
 /// A more optimized `stuff_zeroes(.left, @TypeOf(v), v, ..., 1, 3)`
-pub inline fn stuff_3_zeroes_left(v: anytype) @Type(std.builtin.Type{ .int = .{
-    .bits = @typeInfo(@TypeOf(v)).int.bits * 3,
-    .signedness = .unsigned,
-} }) {
+pub inline fn stuff_3_zeroes_left(v: anytype) @Int(
+    .unsigned,
+    @typeInfo(@TypeOf(v)).int.bits * 3,
+) {
     const T = @TypeOf(v);
     const v_bits = @typeInfo(T).int.bits;
     const full_nibbles = v_bits / 4;
@@ -149,10 +149,7 @@ pub inline fn stuff_3_zeroes_left(v: anytype) @Type(std.builtin.Type{ .int = .{
         return @intCast(s3zl_impl(@intCast(v)));
     }
 
-    const Ret = @Type(std.builtin.Type{ .int = .{
-        .bits = v_bits * 3,
-        .signedness = .unsigned,
-    } });
+    const Ret = @Int(.unsigned, v_bits * 3);
 
     var ret: Ret = 0;
 
@@ -214,10 +211,7 @@ test us3zl_impl {
     try std.testing.expectEqual(0b0000, us3zl_impl(0b110110110110));
 }
 
-pub inline fn unstuff_3_zeroes_left(v: anytype) @Type(std.builtin.Type{ .int = .{
-    .bits = @typeInfo(@TypeOf(v)).int.bits / 3,
-    .signedness = .unsigned,
-} }) {
+pub inline fn unstuff_3_zeroes_left(v: anytype) @Int(.unsigned, @typeInfo(@TypeOf(v)).int.bits / 3) {
     const T = @TypeOf(v);
     const v_bits = @typeInfo(T).int.bits;
     std.debug.assert((v_bits % 3) == 0);
@@ -229,8 +223,7 @@ pub inline fn unstuff_3_zeroes_left(v: anytype) @Type(std.builtin.Type{ .int = .
         return @intCast(us3zl_impl(@intCast(v)));
     }
 
-    const ret_bits = v_bits / 3;
-    const Ret = @Type(std.builtin.Type{ .int = .{ .bits = ret_bits, .signedness = .unsigned } });
+    const Ret = @Int(.unsigned, v_bits / 3);
 
     var ret: Ret = 0;
 
@@ -377,11 +370,12 @@ pub fn compress(comptime T: type, vec: @Vector(8, T), mask: u8) @Vector(8, T) {
     // TODO: make this more efficient
 
     var ret: @Vector(8, T) = @splat(undefined);
-    for (0..8) |i| {
+    inline for (0..8) |i| {
         const j: u3 = @intCast(7 - i);
-        if (((mask >> j) & 1) == 0) continue;
-        ret = @shuffle(T, ret, undefined, @Vector(8, i32){ 0, 0, 1, 2, 3, 4, 5, 6 });
-        ret[0] = vec[@intCast(j)];
+        if (((mask >> j) & 1) != 0) {
+            ret = @shuffle(T, ret, undefined, @Vector(8, i32){ 0, 0, 1, 2, 3, 4, 5, 6 });
+            ret[0] = vec[@intCast(j)];
+        }
     }
 
     return ret;

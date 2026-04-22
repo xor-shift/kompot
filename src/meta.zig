@@ -38,15 +38,15 @@ pub fn PointerWithSizeLike(
     comptime size: std.builtin.Type.Pointer.Size,
     comptime Like: type,
 ) type {
-    const like = @typeInfo(Like);
-    if (like != .pointer) @compileError("PointerLike's `Like` argument must be a pointer type");
+    const like = @typeInfo(Like).pointer;
 
-    var ptr = like.pointer;
-    ptr.child = T;
-    ptr.alignment = @alignOf(T);
-    ptr.size = size;
-
-    return @Type(.{ .pointer = ptr });
+    return @Pointer(size, .{
+        .@"const" = like.is_const,
+        .@"volatile" = like.is_volatile,
+        .@"allowzero" = like.is_allowzero,
+        .@"addrspace" = like.address_space,
+        .@"align" = like.alignment,
+    }, T, null);
 }
 
 pub fn PointerLike(comptime T: type, comptime Like: type) type {

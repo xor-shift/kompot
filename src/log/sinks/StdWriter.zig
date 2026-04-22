@@ -13,7 +13,7 @@ const Self = @This();
 
 pub fn init(
     alloc: std.mem.Allocator,
-    writer: *std.io.Writer,
+    writer: *std.Io.Writer,
 ) Self {
     return .{
         .alloc = alloc,
@@ -58,9 +58,9 @@ fn vDoSink(sink: *Sink, message: Message) anyerror!void {
                         .alignment = element.alignment_kind,
                         .width = element.alignment_width,
                     }, thread_name, 0);
-                } else {
+                } else if (message.thread_id) |thread_id_value| {
                     try self.writer.printInt(
-                        message.thread_id,
+                        thread_id_value,
                         10,
                         .lower,
                         .{
@@ -68,6 +68,8 @@ fn vDoSink(sink: *Sink, message: Message) anyerror!void {
                             .width = element.alignment_width,
                         },
                     );
+                } else {
+                    try self.writer.writeAll("???");
                 }
             },
             .process_id => @panic("NYI"),
@@ -153,7 +155,7 @@ sink: Sink = .{ .vtable = &.{
 
 alloc: std.mem.Allocator,
 
-writer: *std.io.Writer,
+writer: *std.Io.Writer,
 
 pattern_elements_are_owned: bool = false,
 pattern_elements: []const pattern.Element = &pattern.default_patterns.dmesg_esque,

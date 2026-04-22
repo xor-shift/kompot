@@ -141,7 +141,7 @@ pub fn RingBuffer(comptime T: type) type {
         }
 
         pub const Reader = struct {
-            reader: std.io.Reader,
+            reader: std.Io.Reader,
             rb: *Self,
 
             fn init(self: *Self, buffer: []u8) Reader {
@@ -150,7 +150,7 @@ pub fn RingBuffer(comptime T: type) type {
                         .buffer = buffer,
                         .seek = 0,
                         .end = 0,
-                        .vtable = &std.io.Reader.VTable{
+                        .vtable = &std.Io.Reader.VTable{
                             .stream = &Reader.vStream,
                             .discard = &Reader.vDiscard,
                         },
@@ -161,17 +161,17 @@ pub fn RingBuffer(comptime T: type) type {
 
             /// this function is atomic: it will not consume bytes from the
             /// ring buffer if the write operation returns errors.
-            fn vStream(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
+            fn vStream(r: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
                 const ctx: *Reader = @alignCast(@fieldParentPtr("reader", r));
 
                 var written_total: usize = 0;
 
                 while (true) {
                     const remaining_limit = limit.subtract(written_total).?;
-                    if (remaining_limit == std.io.Limit.limited(0)) break;
+                    if (remaining_limit == std.Io.Limit.limited(0)) break;
 
                     const slice = ctx.rb.readableSlice(written_total);
-                    if (slice.len == 0) return std.io.Reader.StreamError.EndOfStream;
+                    if (slice.len == 0) return std.Io.Reader.StreamError.EndOfStream;
 
                     const num_to_consume: usize = remaining_limit.minInt(slice.len);
 
@@ -186,7 +186,7 @@ pub fn RingBuffer(comptime T: type) type {
                 return written_total;
             }
 
-            fn vDiscard(r: *std.io.Reader, limit: std.io.Limit) std.io.Reader.Error!usize {
+            fn vDiscard(r: *std.Io.Reader, limit: std.Io.Limit) std.Io.Reader.Error!usize {
                 const ctx: *Reader = @alignCast(@fieldParentPtr("reader", r));
 
                 const to_discard = limit.minInt(ctx.rb.usedCapacity());
@@ -205,7 +205,7 @@ pub fn RingBuffer(comptime T: type) type {
 test RingBuffer {
     const alloc = std.testing.allocator;
 
-    var allocating_writer = std.io.Writer.Allocating.init(alloc);
+    var allocating_writer = std.Io.Writer.Allocating.init(alloc);
     defer allocating_writer.deinit();
     const writer = &allocating_writer.writer;
 
@@ -239,5 +239,5 @@ test RingBuffer {
     try std.testing.expectEqual(@as(usize, 3), try reader.stream(writer, .limited(3)));
     try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 6, 7, 8 }, allocating_writer.written());
 
-    try std.testing.expectError(std.io.Reader.StreamError.EndOfStream, reader.stream(writer, .limited(1)));
+    try std.testing.expectError(std.Io.Reader.StreamError.EndOfStream, reader.stream(writer, .limited(1)));
 }
