@@ -140,6 +140,21 @@ pub fn RingBuffer(comptime T: type) type {
             self.write_head += num_elements;
         }
 
+        pub fn indexOfScalar(self: *Self, v: T) ?usize {
+            var offset: usize = 0;
+            while (true) {
+                const readable_slice = self.readableSlice(offset);
+                if (readable_slice.len == 0) break;
+
+                defer offset += readable_slice.len;
+
+                const local_index = std.mem.indexOfScalar(T, readable_slice, v) orelse continue;
+                return offset + local_index;
+            }
+
+            return null;
+        }
+
         pub const Reader = struct {
             reader: std.io.Reader,
             rb: *Self,
