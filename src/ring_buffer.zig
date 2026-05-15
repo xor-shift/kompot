@@ -1,5 +1,6 @@
 const std = @import("std");
 
+/// can be used as an atomic SPSC ring buffer.
 pub fn RingBuffer(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -8,8 +9,8 @@ pub fn RingBuffer(comptime T: type) type {
         ///
         /// It's safe to re-set this in between calls to write etc.
         storage: []T,
-        read_head: usize = 0,
-        write_head: usize = 0,
+        read_head: std.atomic.Value(usize) = .init(0),
+        write_head: std.atomic.Value(usize) = .init(0),
 
         pub fn init(storage: []T) Self {
             return .{
@@ -17,15 +18,42 @@ pub fn RingBuffer(comptime T: type) type {
             };
         }
 
-        pub fn usedCapacity(self: Self) usize {
-            return self.write_head - self.read_head;
+        fn usedCapacityImpl(self: *const Self, maybe_read_head: ?usize, maybe_write_head: ?usize) usize {
+            // these may both advance and that's ok
+
+            const write_head = maybe_write_head orelse self.write_head.load(.acquire);
+            const read_head = maybe_read_head orelse self.read_head.load(.acquire);
+
+            return write_head - read_head;
         }
 
-        pub fn remainingCapacity(self: Self) usize {
-            return self.storage.len - self.usedCapacity();
+        fn remainingCapacityImpl(self: *const Self, maybe_read_head: ?usize, maybe_write_head: ?usize) usize {
+            const used_capacity = self.usedCapacityImpl(maybe_read_head, maybe_write_head);
+
+            return self.storage.len - used_capacity;
         }
 
-        /// From the infinite-index `head` into `self.storage`, fetches at most
+        /// returns the best-effort used capacity.
+        ///
+        /// meant to be called by the consumer side.
+        ///
+        /// there might be more elements stored than the number this function
+        /// returns if the RB is used in a SPSC manner.
+        pub fn usedCapacity(self: *const Self) usize {
+            return self.usedCapacityImpl(self.read_head.load(.unordered), null);
+        }
+
+        /// returns the best-effort free capacity.
+        ///
+        /// meant to be called by the producer side.
+        ///
+        /// there might be more elements free than the number this functon
+        /// returns if the RB is used in a SPSC manner.
+        pub fn remainingCapacity(self: *const Self) usize {
+            return self.remainingCapacityImpl(null, self.write_head.load(.unordered));
+        }
+
+        /// from the infinite-index `head` into `self.storage`, fetches at most
         /// `no_more_than` elements.
         fn getSlice(
             self: Self,
@@ -39,18 +67,26 @@ pub fn RingBuffer(comptime T: type) type {
             return self.storage[rela_h .. rela_h + num_elems];
         }
 
-        /// Pretends that `offset` number of elements were written a call to this
+        /// pretends that `offset` number of elements were written a call to this.
+        ///
+        /// meant to be called by the producer side.
         pub fn writableSlice(self: *Self, offset: usize) []T {
-            std.debug.assert(offset <= self.remainingCapacity());
+            const remaining_capacity = self.remainingCapacity();
 
-            return self.getSlice(self.write_head + offset, self.remainingCapacity() - offset);
+            std.debug.assert(offset <= remaining_capacity);
+
+            return self.getSlice(self.write_head.load(.unordered) + offset, remaining_capacity - offset);
         }
 
-        /// Pretends that `offset` number of elements were read before a call to this
+        /// pretends that `offset` number of elements were read before a call to this
+        ///
+        /// mreant to be called by the consumer side
         pub fn readableSlice(self: Self, offset: usize) []const T {
-            std.debug.assert(offset <= self.usedCapacity());
+            const used_capacity = self.usedCapacity();
 
-            return self.getSlice(self.read_head + offset, self.usedCapacity() - offset);
+            std.debug.assert(offset <= used_capacity);
+
+            return self.getSlice(self.read_head.load(.unordered) + offset, used_capacity - offset);
         }
 
         pub fn writeSome(self: *Self, in: []const T) usize {
@@ -59,7 +95,8 @@ pub fn RingBuffer(comptime T: type) type {
             const num_to_write = @min(slice.len, in.len);
 
             @memcpy(slice[0..num_to_write], in[0..num_to_write]);
-            self.write_head += num_to_write;
+
+            self.write_head.store(self.write_head.load(.unordered) + num_to_write, .release);
 
             return num_to_write;
         }
@@ -92,7 +129,7 @@ pub fn RingBuffer(comptime T: type) type {
         /// Pretends that `offset` number of elements were read before a call to this.
         pub fn readAfter(self: *Self, out: []T, offset: usize) usize {
             const num_read = self.peekAfter(out, offset);
-            self.read_head += num_read;
+            self.read_head.store(self.read_head.load(.unordered) + num_read, .release);
 
             return num_read;
         }
@@ -122,22 +159,25 @@ pub fn RingBuffer(comptime T: type) type {
 
         pub fn readAll(self: *Self, out: []T) void {
             self.peekAll(out);
-            self.read_head += out.len;
+            self.read_head.store(self.read_head.load(.unordered) + out.len, .release);
         }
 
+        /// unsafe to use multithreaded!
         pub fn rewind(self: *Self, num_elements: usize) void {
             std.debug.assert(self.remainingCapacity() >= num_elements);
-            self.read_head -= num_elements;
+            self.read_head.store(self.read_head.load(.unordered) - num_elements, .unordered);
         }
 
+        /// pretends that `num_elements` elements were read
         pub fn discard(self: *Self, num_elements: usize) void {
             std.debug.assert(self.usedCapacity() >= num_elements);
-            self.read_head += num_elements;
+            self.read_head.store(self.read_head.load(.unordered) + num_elements, .release);
         }
 
+        /// pretends that `num_elements` elements were written
         pub fn advance(self: *Self, num_elements: usize) void {
             std.debug.assert(self.remainingCapacity() >= num_elements);
-            self.write_head += num_elements;
+            self.write_head.store(self.write_head.load(.unordered) + num_elements, .release);
         }
 
         pub fn indexOfScalar(self: *Self, v: T) ?usize {

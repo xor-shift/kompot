@@ -12,6 +12,7 @@ pub const log = @import("log/root.zig");
 pub const net = @import("net/root.zig");
 pub const rand = @import("rand/root.zig");
 pub const sync = @import("sync/root.zig");
+pub const uuid = @import("uuid/root.zig");
 pub const wgm = @import("wgm/root.zig");
 
 pub const HyperGraph = @import("HyperGraph.zig");
@@ -37,6 +38,7 @@ test {
     std.testing.refAllDecls(net);
     std.testing.refAllDecls(rand);
     std.testing.refAllDecls(sync);
+    std.testing.refAllDecls(uuid);
     std.testing.refAllDecls(wgm);
 
     std.testing.refAllDecls(HyperGraph);

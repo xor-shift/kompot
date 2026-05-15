@@ -34,7 +34,7 @@ pub fn Arc(comptime T: type, comptime Deleter: type) type {
             };
         }
 
-        pub fn deinit(self: Self) void {
+        fn deinitImpl(self: Self, call_deleter: bool) void {
             // ordering taken from rust's Arc
             if (@atomicRmw(usize, &self.cb.refcount, .Sub, 1, .release) != 1) {
                 return;
@@ -42,10 +42,18 @@ pub fn Arc(comptime T: type, comptime Deleter: type) type {
 
             self.alloc.destroy(self.cb);
 
-            self.deleter.delete(self.child);
+            if (call_deleter) self.deleter.delete(self.child);
             self.alloc.destroy(self.child);
 
             return;
+        }
+
+        pub fn deinitWithoutDeleterCall(self: Self) void {
+            return self.deinitImpl(false);
+        }
+
+        pub fn deinit(self: Self) void {
+            return self.deinitImpl(true);
         }
 
         pub fn clone(self: Self) Self {
